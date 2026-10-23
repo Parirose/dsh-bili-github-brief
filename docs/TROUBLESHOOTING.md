@@ -1,0 +1,42 @@
+# 排障
+
+## DSH 设置页没有出现
+
+- 确认安装到了正确的 profile
+- 确认重启过 DSH
+- 查看 DSH 日志是否有插件加载错误
+
+## GitHub 403 / 限流
+
+- 确认 GitHub Token 有效
+- 确认 token 至少有公开仓库只读权限
+- 匿名限额很低，正式使用建议配 token
+- 不要把 token 发到聊天或提交到仓库
+
+## B站没有字幕
+
+- 该视频可能没有 AI 字幕
+- 开启「本地转写」并安装转写依赖
+- 转写失败时报告会写「因无字幕跳过 N 条」
+
+## QQ 没收到
+
+- 确认 NapCat 插件已加载
+- 访问 `/plugin/napcat-plugin-dsh-bili-forward/api/health`
+- 确认 `groupIds` / `privateIds` 已填
+- 确认 DSH 和 NapCat 的 token 一致
+- 确认 NapCat WebUI 端口和 DSH 里的 `qqForwardUrl` 一致
+- 改完 NapCat 配置后重启 NapCat
+- 通常不需要重启 QQ；如果实际环境要求，先询问用户
+
+## QQ 消息重复
+
+- 插件有 10 分钟去重
+- DSH 侧有 `briefHash`，同一内容不会重复发送
+- 如果手动重跑且内容变化，会再发一次
+
+## 模板占位符没有替换
+
+- 确认 DSH 已重启并加载最新 `index.js`
+- 确认 `prompts/brief-prompt.txt` 存在
+- 如果仍然出现 `{{DATE}}` 等占位符，查看 `duty.log` 并重启 DSH

@@ -1,0 +1,51 @@
+- id: credentials
+  disabled: false
+
+- id: authorization
+  disabled: false
+
+- id: deepseek-account
+  disabled: false
+
+- id: llm-pi-ai
+  config:
+    providers:
+      your-provider:
+        displayName: Your Provider
+        apiKeyEnv: YOUR_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:8788/v1
+        models:
+          - id: your-model
+            name: Your Model
+            contextWindow: 1000000
+            maxTokens: 128000
+            input:
+              - text
+              - image
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+
+- id: agent-default-model
+  config:
+    provider: your-provider
+    model: your-model
+    reasoningEffort: high
+
+- insert:
+    - id: mcp-bili-duty
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: bili-duty
+        transport: stdio
+        command: '<PYTHON_PATH>'
+        args:
+          - '<DSH_HOME>/bili-duty/mcp_server.py'
+        env:
+          BILI_MCP_TOOLS: 'bili_search,bili_subtitle,bili_comments,bili_video_info,github_search,github_repo,github_tree,github_file,github_releases,github_workflows'
+          BILI_DUTY_QQ_WEBHOOK: 'http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward'
+          BILI_DUTY_QQ_TOKEN: '<QQ_FORWARD_TOKEN>'
+          BILI_DUTY_GITHUB_TOKEN: '<GITHUB_TOKEN>'

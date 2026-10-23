@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "groupIds": "123456789,987654321",
+  "privateIds": "10001,10002",
+  "forwardComments": true,
+  "forwardDms": true,
+  "forwardBriefs": true,
+  "includeLink": true,
+  "prefix": "【B站】",
+  "template": "{prefix} {kind}\n{text}\n{url}",
+  "token": "change-me",
+  "atSign": ""
+}

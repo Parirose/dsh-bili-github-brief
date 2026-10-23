@@ -1,0 +1,26 @@
+{
+  "briefMode": true,
+  "githubEnabled": true,
+  "githubToken": "",
+  "githubDiscover": true,
+  "workflowScan": true,
+  "scheduleEnabled": false,
+  "scheduleTime": "09:00",
+  "dmMode": "off",
+  "qqForwardUrl": "http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward",
+  "qqForwardToken": "change-me",
+  "keywords": [
+    "ComfyUI",
+    "ComfyUI 工作流",
+    "AIGC",
+    "Krea2",
+    "Minimax-H3",
+    "LoRA",
+    "生图",
+    "生视频"
+  ],
+  "perDay": 10,
+  "transcribe": true,
+  "asrModel": "small",
+  "reportLevel": "full"
+}

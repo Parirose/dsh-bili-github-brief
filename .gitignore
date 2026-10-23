@@ -1,0 +1,33 @@
+# runtime / secrets
+bili_credential.json
+config.json
+headless-overlay.yml
+duty.log
+state.json
+seen.md
+digest/
+out/
+.env
+.env.*
+*.log
+*.bak-*
+*.bak
+napcat-plugin/config.json
+
+# local environments
+.venv/
+.venv-asr/
+.hf-cache/
+__pycache__/
+*.pyc
+node_modules/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# build / package
+dist/
+*.tgz

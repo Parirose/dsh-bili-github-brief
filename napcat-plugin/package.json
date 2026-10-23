@@ -1,0 +1,27 @@
+{
+  "name": "napcat-plugin-dsh-bili-forward",
+  "plugin": "B站 + GitHub AIGC 日报转发",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.mjs",
+  "description": "接收 DSH 插件发出的 brief_ready 事件，把 B站 + GitHub AIGC 日报转发到多个 QQ 群或 QQ 私聊；也兼容评论 @ / 私信事件。",
+  "author": "Parirose",
+  "license": "MIT",
+  "keywords": [
+    "napcat",
+    "plugin",
+    "bilibili",
+    "github",
+    "aigc",
+    "forward",
+    "notification"
+  ],
+  "napcat": {
+    "tags": [
+      "工具",
+      "通知"
+    ],
+    "minVersion": "4.14.0",
+    "homepage": "https://github.com/Parirose/dsh-bili-github-brief"
+  }
+}

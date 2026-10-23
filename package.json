@@ -1,0 +1,86 @@
+{
+  "name": "dsh-bili-github-brief",
+  "version": "0.1.0",
+  "description": "B站 + GitHub AIGC 日报：DSH 插件 + NapCat QQ 投递",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "bilibili",
+    "github",
+    "aigc",
+    "comfyui",
+    "napcat",
+    "qq"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Parirose/dsh-bili-github-brief.git"
+  },
+  "homepage": "https://github.com/Parirose/dsh-bili-github-brief#readme",
+  "bugs": {
+    "url": "https://github.com/Parirose/dsh-bili-github-brief/issues"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib",
+    "prompts",
+    "vendor",
+    "napcat-plugin",
+    "examples",
+    "docs",
+    "scripts",
+    "README.md",
+    "BRIEF.md",
+    "NOTICE.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "dsh": ">=0.1.7-rc.1",
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
