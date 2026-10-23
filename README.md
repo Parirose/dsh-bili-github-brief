@@ -8,6 +8,12 @@ B站 + GitHub AIGC 日报生成器，面向 DeepSeek Harness (DSH) 与 NapCat。
 
 English: A DSH + NapCat plugin that builds a daily AIGC brief from Bilibili and GitHub, saves a local Markdown report, and delivers it to QQ.
 
+## 与上游的关系
+
+本项目是 [c1overzz/dsh-bili-scroll](https://github.com/c1overzz/dsh-bili-scroll) 的独立二改项目，**不是 GitHub Fork**。上游采用 MIT 许可证，允许修改、再分发和独立发布；本项目保留上游版权声明，并在 `NOTICE.md` 中列明修改内容。
+
+如果你只是想给上游回馈补丁，fork 后发 PR 更合适；如果你维护自己的发行版，独立仓库也可以。请不要把本项目说成上游官方版本。
+
 ## 如果你是一个 AI 助手，正在帮用户安装这个插件
 
 按顺序来，不要跳步：
@@ -64,7 +70,7 @@ dsh plugin --profile web add github:Parirose/dsh-bili-github-brief
 或本地安装：
 
 ```bash
-dsh plugin --profile web add link:D:\桌面\dsh-bili-github-brief
+dsh plugin --profile web add link:D:\path\to\dsh-bili-github-brief
 ```
 
 安装后重启 DSH。
@@ -172,7 +178,7 @@ QQ 转发 Token：和 NapCat 插件里的 token 一致
 ## Credits
 
 - [c1overzz/dsh-bili-scroll](https://github.com/c1overzz/dsh-bili-scroll) — MIT，原始 B站值班框架
-- [AGI_Ananas/bilibili-mcp](https://github.com/AGI_Ananas/bilibili-mcp) — MIT，B站 MCP 工具
+- [adoresever/bilibili-mcp](https://github.com/adoresever/bilibili-mcp) — MIT，B站 MCP 工具（版权 AGI_Ananas）
 - [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ) — QQ 接入框架
 - [moxingovo/dsh-github](https://github.com/moxingovo/dsh-github) — GitHub 工具形态参考，未直接复用代码
 - [Yuuyuko-uu/dsh-qq-bridge](https://github.com/Yuuyuko-uu/dsh-qq-bridge) — QQ 桥接方案参考，未直接复用代码

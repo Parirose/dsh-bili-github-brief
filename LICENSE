@@ -1,7 +1,7 @@
 MIT License
 
 Copyright (c) 2026 Parirose and contributors
-Copyright (c) 2026 dsh-bili-duty contributors (upstream dsh-bili-scroll)
+Copyright (c) 2026 c1overzz (upstream dsh-bili-scroll)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,4 +23,5 @@ SOFTWARE.
 
 Third-party code:
 - vendor/bilibili-mcp: MIT, Copyright (c) 2026 AGI_Ananas.
+  Upstream repo: https://github.com/adoresever/bilibili-mcp
   See vendor/bilibili-mcp/LICENSE for the full text.
