@@ -11,7 +11,7 @@
 - 仓库：https://github.com/c1overzz/dsh-bili-scroll
 - 许可证：MIT
 - 原始版权：Copyright (c) 2026 c1overzz
-- 上游版本：2d71abd25bee19a6bdc0c586b7d6e11c5ee4499c（2026-10-22）
+- 审计时上游 HEAD：2d71abd25bee19a6bdc0c586b7d6e11c5ee4499c（2026-10-22）
 - 使用方式：本项目基于其 B站值班框架、DSH 插件结构、MCP 启动方式与报告流程进行了修改。
 
 主要修改：

@@ -7,7 +7,7 @@ B站数据采集 MCP 服务，支持 OpenClaw / Claude Code / Cursor / Cline
 首次运行需扫码登录B站，凭证自动保存复用
 """
 
-# ⭐ 这个文件是从上游 AGI_Ananas/bilibili-mcp（MIT，见同目录 LICENSE）vendor 进来的。
+# ⭐ 这个文件是从上游 adoresever/bilibili-mcp（MIT，见同目录 LICENSE）vendor 进来的。
 #    本插件在它上面只加了下面这几处 —— **将来重新 vendor 时，这几处要原样补回来**（漏一处就少一道闸 ✗）：
 #      ① `_ALLOWED` + `tool()` 白名单替身：工具按名单注册，名单外的连名字都不出现（见下）
 #      ② `load_credential` 读取容错 + encoding="utf-8" + isinstance(data, dict) 校验
