@@ -50,7 +50,7 @@ git reflog expire --expire=now --all
 git gc --prune=now
 ```
 
-如果要做到「GitHub 上也彻底没有旧对象」，最稳妥的方式是：公开前删除这个私有仓库，重新创建一个空私有仓库，再 push 当前干净历史。旧仓库没有 star / fork 时成本很低。
+注意：force push 不会立刻删除 GitHub 上的旧对象；旧 commit 仍可能通过 `git fetch <sha>` 取回。如果要做到「GitHub 上也彻底没有旧对象」，最稳妥的方式是：公开前删除这个私有仓库，重新创建一个空私有仓库，再 push 当前干净历史。旧仓库没有 star / fork 时成本很低。
 
 提交邮箱建议使用 GitHub noreply：
 
