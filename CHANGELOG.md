@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3
+
+### Fixed
+- `ensureOverlay()` 不再写死 `wb-proxy` / `WB_PROXY_API_KEY` / `127.0.0.1:8788`，headless 直接继承用户 profile / home 层的模型配置
+- `findDshCli()` 先直接探测 `<resources>/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js`，不再被 asar 的 `Dirent.isDirectory() === false` 卡住
+- `ensureUv()` 下载增加 `AbortSignal.timeout(120000)`；失败/超时写入原因和手工兜底命令
+- `bili_setup` 增加 `force: true`，用于复位卡住的 `installing`
+- 优先复用宿主自带 uv（`@dataiku/uv-*`），再探测 `%LOCALAPPDATA%\uv`、`%USERPROFILE%\.cargo\bin`、PATH
+
+### Added
+- `docs/TROUBLESHOOTING.md`：补手工建 venv、依赖判定条件和 `bili_setup force` 用法
+
 ## 0.1.2
 
 ### Fixed

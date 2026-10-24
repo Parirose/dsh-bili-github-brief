@@ -92,3 +92,58 @@ icacls "<目录>" /setintegritylevel (OI)(CI)Medium /T
 ```text
 components\QQ\current.txt = <版本号>
 ```
+
+## 装依赖卡在「正在下载 uv」
+
+现象：
+
+```text
+install.log: 正在下载 uv —— GitHub 直连
+```
+
+之后 `bili_setup` 一直返回 `busy:true`，但没有任何安装进程，`venv` 也没创建。
+
+原因：
+
+- uv 下载没有超时；网络到 GitHub release 很慢时会一直挂着
+- `installing` 是进程内内存标志，下载卡死后不会自己复位
+
+处理：
+
+1. 先强制复位安装状态：
+
+```json
+{"force": true}
+```
+
+调用 `bili_setup` 时传这个参数。
+
+2. 如果还是下载失败，手工装 venv：
+
+```powershell
+uv venv <家>\.venv --python 3.12
+uv pip install --python <家>\.venv\Scripts\python.exe `
+  -r <仓库>\vendor\bilibili-mcp\requirements.txt `
+  --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+其中 `<家>` 是：
+
+```text
+<DSH_HOME>\bili-duty
+```
+
+3. 插件判定「venv 就绪」的条件：
+
+```text
+<家>\.venv\Scripts\python.exe 存在
+site-packages 里有 bilibili_api / mcp / qrcode
+```
+
+4. 装完后把 `pythonPath` 指到：
+
+```text
+<家>\.venv\Scripts\python.exe
+```
+
+新版会优先复用宿主自带的 uv，再试 `%LOCALAPPDATA%\uv`、`%USERPROFILE%\.cargo\bin` 和 PATH，最后才下载。

@@ -24,7 +24,7 @@ const z = hostDeps.z
 const defineTool = hostDeps.defineTool
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -835,8 +835,16 @@ export function apply(ctx, config) {
     name: 'bili_setup',
     description: '给刷B站装运行环境：在插件家目录建一个**独立 venv**、装上那个 Python MCP 的依赖，装完自动把 `pythonPath` 指过去。\n'
       + '**第一次用之前跑一次**。⭐ 它**起完就返回、不等装完**（几分钟的活），进度看家目录里的 `install.log`。',
-    parameters: {},
-    async execute() { return runInstall() },
+    parameters: {
+      force: { type: 'boolean', description: '安装卡住时强制复位 installing 并重新开始' },
+    },
+    async execute(args) {
+      if (args?.force) {
+        installing = false
+        appendInstall('\n=== bili_setup force：手动复位 installing ===\n')
+      }
+      return runInstall()
+    },
   })
 
   tool({
@@ -957,7 +965,23 @@ export function apply(ctx, config) {
       '/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
       '/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
     ].filter(Boolean)) if (existsSync(g)) return g
-    // ④ 桌面版：在应用目录里有界搜一遍
+    // ④ 打包版（Electron）：app.asar 在文件系统层面是**文件**，不是目录
+    //    ⇒ scanForDsh 的 Dirent.isDirectory() 永远进不去，直接探测已知路径。
+    {
+      const packagedRoots = []
+      if (process.resourcesPath) packagedRoots.push(process.resourcesPath)
+      try {
+        packagedRoots.push(join(dirname(process.execPath), 'resources'))
+        if (process.platform === 'darwin') packagedRoots.push(join(dirname(dirname(process.execPath)), 'Resources'))
+      } catch { /* 没有就算了 */ }
+      for (const res of [...new Set(packagedRoots)].filter(Boolean)) {
+        for (const rel of ['app.asar', 'app.asar.unpacked']) {
+          const p = join(res, rel, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+          if (existsSync(p)) return p
+        }
+      }
+    }
+    // ⑤ 桌面版：在应用目录里有界搜一遍（兜底）
     const roots = []
     if (process.resourcesPath) roots.push(process.resourcesPath)
     try { roots.push(join(dirname(process.execPath), 'resources')) } catch { /* 没有就算了 */ }
@@ -1191,39 +1215,11 @@ export function apply(ctx, config) {
     for (const id of ['credentials', 'authorization', 'deepseek-account']) {
       yml.push('- id: ' + id, '  disabled: false', '')
     }
-    // ⭐ 2026-10-20：headless 默认走 deepseek-official + DEEPSEEK_API_KEY；
-    //    如果那个 key 失效，整轮会在第一次模型调用就退出（AUTH ... invalid）。
-    //    这里把 headless 也钉到 Web UI 正在用的本地 wb-proxy，避免依赖另一套 key。
-    yml.push(
-      '- id: llm-pi-ai',
-      '  config:',
-      '    providers:',
-      '      wb-proxy:',
-      '        displayName: WB Proxy',
-      '        apiKeyEnv: WB_PROXY_API_KEY',
-      '        api: openai-completions',
-      '        baseURL: http://127.0.0.1:8788/v1',
-      '        models:',
-      '          - id: deepseek-v4.1-flash',
-      '            name: Deepseek-V4.1-Flash',
-      '            contextWindow: 1000000',
-      '            maxTokens: 128000',
-      '            input:',
-      '              - text',
-      '              - image',
-      '            reasoningEfforts:',
-      '              off: null',
-      '              low: low',
-      '              medium: medium',
-      '              high: high',
-      '',
-      '- id: agent-default-model',
-      '  config:',
-      '    provider: wb-proxy',
-      '    model: deepseek-v4.1-flash',
-      '    reasoningEffort: high',
-      '',
-    )
+    // ⭐ overlay 不碰 llm-pi-ai / agent-default-model：headless 直接继承 profile / home 层的配置。
+    //    之前这里写死 wb-proxy + WB_PROXY_API_KEY + 127.0.0.1:8788，会覆盖用户自己的 provider，
+    //    在别的机器上必然 MISSING_CREDENTIAL。保留上面的 credentials / authorization /
+    //    deepseek-account 开关，以及下面的 MCP insert。
+
     if (cfg.overlayMcp) {
       yml.push(
         '- insert:',
@@ -1558,14 +1554,63 @@ export function apply(ctx, config) {
   }
   let installingAsr = false
 
-  /** 找 uv：系统里的 → 插件家里下好的 → 自己下一份（给"两样都没有"的人）；主/转写两套安装共用 */
+  const uvBinName = () => process.platform === 'win32' ? 'uv.exe' : 'uv'
+  const hostUvCandidates = () => {
+    const out = []
+    const bin = uvBinName()
+    const roots = []
+    if (process.resourcesPath) roots.push(process.resourcesPath)
+    try {
+      roots.push(join(dirname(process.execPath), 'resources'))
+      if (process.platform === 'darwin') roots.push(join(dirname(dirname(process.execPath)), 'Resources'))
+    } catch { /* 没有就算了 */ }
+    for (const r of [...new Set(roots)].filter(Boolean)) {
+      out.push(join(r, 'app.asar.unpacked', 'node_modules', '@dataiku', `uv-${process.platform}-${process.arch}`, 'bin', bin))
+    }
+    return out
+  }
+  const knownUvCandidates = () => {
+    const out = hostUvCandidates()
+    const bin = uvBinName()
+    const local = process.env.LOCALAPPDATA
+    if (local) {
+      out.push(join(local, 'uv', bin))
+      out.push(join(local, 'uv', 'bin', bin))
+    }
+    const home = process.env.USERPROFILE || process.env.HOME
+    if (home) {
+      out.push(join(home, '.cargo', 'bin', bin))
+      out.push(join(home, '.local', 'bin', bin))
+    }
+    return [...new Set(out)]
+  }
+
+  /** 找 uv：插件家里已有的 → 宿主自带 → 常见安装位置 → PATH → 自己下一份 */
   const resolveUv = async () => {
-    const bundled = join(stateDir, 'bin', process.platform === 'win32' ? 'uv.exe' : 'uv')
-    if (await haveUv()) return 'uv'
+    const bundled = join(stateDir, 'bin', uvBinName())
     if (existsSync(bundled)) return bundled
+    const host = hostUvCandidates().find((p) => existsSync(p))
+    if (host) {
+      try {
+        mkdirSync(dirname(bundled), { recursive: true })
+        copyFileSync(host, bundled)
+        appendInstall(`发现宿主自带 uv：${host}\n已复制到：${bundled}\n`)
+        return bundled
+      } catch (e) {
+        appendInstall(`发现宿主自带 uv：${host}，但复制失败：${e?.message ?? e}\n`)
+        return host
+      }
+    }
+    const known = knownUvCandidates().find((p) => existsSync(p))
+    if (known) {
+      appendInstall('发现本机 uv：' + known + '\n')
+      return known
+    }
+    if (await haveUv()) return 'uv'
     appendInstall('这台机器上没有 uv —— 我下一份放进插件家目录（单文件、免管理员、约 15MB，只需要一次）…\n')
     const got = await ensureUv({ dir: join(stateDir, 'bin'), log: appendInstall })
     if (got) appendInstall('uv 已就位：' + got + '\n')
+    else appendInstall('uv 下载失败。请查看上面的失败原因；也可以手动安装 uv 后重新点「装依赖」。\n')
     return got
   }
 
