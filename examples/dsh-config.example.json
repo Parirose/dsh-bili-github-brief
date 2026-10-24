@@ -9,6 +9,9 @@
   "dmMode": "off",
   "qqForwardUrl": "http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward",
   "qqForwardToken": "change-me",
+  "qqBackend": "napcat-plugin",
+  "qqGroupIds": "",
+  "qqPrivateIds": "",
   "keywords": [
     "ComfyUI",
     "ComfyUI 工作流",

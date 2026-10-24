@@ -63,6 +63,12 @@ export const Config = !z ? undefined : z.object({
   qqForwardUrl: z.string().default('').extra('volatile', true),
   /** ⭐ QQ 转发口令（可选，和 NapCat 插件里填的一致） */
   qqForwardToken: z.string().default('').extra('volatile', true),
+  /** QQ 投递后端：napcat-plugin = NapCat 插件 webhook；onebot = 直接调 OneBot v11 HTTP */
+  qqBackend: z.string().default('napcat-plugin').extra('volatile', true),
+  /** OneBot 群号，英文逗号分隔；qqBackend=onebot 时使用 */
+  qqGroupIds: z.string().default('').extra('volatile', true),
+  /** OneBot 私聊 QQ，英文逗号分隔；qqBackend=onebot 时使用 */
+  qqPrivateIds: z.string().default('').extra('volatile', true),
   briefMode: z.boolean().default(true).extra('volatile', true),
   githubEnabled: z.boolean().default(true).extra('volatile', true),
   githubToken: z.string().default('').extra('volatile', true),
@@ -206,7 +212,7 @@ export function apply(ctx, config) {
    */
   const DEFAULTS = {
     perDay: 5, peakValley: false, noon: true, night: true, autoComment: false, transcribe: false, asrModel: 'small',
-    dmMode: 'off', dmUid: 0, qqForwardUrl: '', qqForwardToken: '', briefMode: true, githubEnabled: true, githubToken: '', githubDiscover: true, workflowScan: true, scheduleEnabled: false, scheduleTime: '09:00',
+    dmMode: 'off', dmUid: 0, qqForwardUrl: '', qqForwardToken: '', qqBackend: 'napcat-plugin', qqGroupIds: '', qqPrivateIds: '', briefMode: true, githubEnabled: true, githubToken: '', githubDiscover: true, workflowScan: true, scheduleEnabled: false, scheduleTime: '09:00',
     keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
   }
   const normalize = (src, base) => {
@@ -243,6 +249,9 @@ export function apply(ctx, config) {
     if ('commentPerRound' in p) p.commentPerRound = Math.max(0, Math.min(Number(p.commentPerRound) || 0, 20))
     if ('qqForwardUrl' in p) p.qqForwardUrl = String(p.qqForwardUrl || '').trim()
     if ('qqForwardToken' in p) p.qqForwardToken = String(p.qqForwardToken || '')
+    if ('qqBackend' in p) p.qqBackend = String(p.qqBackend) === 'onebot' ? 'onebot' : 'napcat-plugin'
+    if ('qqGroupIds' in p) p.qqGroupIds = String(p.qqGroupIds || '').trim()
+    if ('qqPrivateIds' in p) p.qqPrivateIds = String(p.qqPrivateIds || '').trim()
     if ('githubToken' in p) p.githubToken = String(p.githubToken || '').trim()
     if ('scheduleTime' in p) {
       const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(p.scheduleTime || '').trim())
@@ -446,8 +455,81 @@ export function apply(ctx, config) {
     return client.call(toolName, args, opts)
   }
 
-  /** 把发出去的评论/私信转发给 NapCat 插件；失败只记日志，不影响 B 站这一轮。 */
+  const qqOneBotMode = () => String(cfg.qqBackend || 'napcat-plugin') === 'onebot'
+  const splitQQIds = (v) => {
+    const arr = Array.isArray(v) ? v : String(v || '').split(/[\s,，;；]+/)
+    return [...new Set(arr.map((x) => String(x).trim()).filter(Boolean))]
+  }
+  const oneBotBase = () => String(cfg.qqForwardUrl || '').trim()
+    .replace(/\/+$/, '')
+    .replace(/\/(send_private_msg|send_group_msg)$/i, '')
+  const oneBotTargets = () => ({
+    groups: splitQQIds(cfg.qqGroupIds),
+    privates: splitQQIds(cfg.qqPrivateIds),
+  })
+  const oneBotPost = async (endpoint, payload) => {
+    const base = oneBotBase()
+    if (!base) return { ok: false, skipped: 'no-url' }
+    const url = `${base}/${endpoint}`
+    const headers = { 'content-type': 'application/json' }
+    if (cfg.qqForwardToken) headers.authorization = `Bearer ${String(cfg.qqForwardToken)}`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000),
+    })
+    let body = null
+    try { body = await res.json() } catch { /* response may be empty */ }
+    if (!res.ok) return { ok: false, status: res.status, url, body }
+    if (body && (body.status === 'failed' || (body.retcode !== undefined && Number(body.retcode) !== 0))) {
+      return { ok: false, status: res.status, url, body }
+    }
+    return { ok: true, status: res.status, url, body }
+  }
+  const oneBotText = (event) => {
+    if (event?.event === 'comment_sent') return `【B站】评论已发\n${event.text || ''}\n${event.url || ''}`.trim()
+    if (event?.event === 'dm_sent') return `【B站】私信已发\n${event.text || ''}\n${event.url || ''}`.trim()
+    return String(event?.text || '').trim()
+  }
+  const notifyOneBot = async (event) => {
+    const base = oneBotBase()
+    if (!base) return { ok: false, skipped: 'no-url' }
+    const { groups, privates } = oneBotTargets()
+    if (!groups.length && !privates.length) return { ok: false, skipped: 'no-targets' }
+    const parts = event?.event === 'brief_ready'
+      ? (Array.isArray(event?.parts) && event.parts.length ? event.parts : [event?.text])
+      : [oneBotText(event)]
+    const messages = parts.map((x) => String(x || '').trim()).filter(Boolean)
+    if (!messages.length) return { ok: false, skipped: 'empty' }
+    let sent = 0
+    const failures = []
+    for (const message of messages) {
+      for (const group_id of groups) {
+        try {
+          const r = await oneBotPost('send_group_msg', { group_id, message })
+          if (r.ok) sent++
+          else failures.push({ target: `group:${group_id}`, ...r })
+        } catch (e) { failures.push({ target: `group:${group_id}`, ok: false, error: String(e?.message ?? e) }) }
+      }
+      for (const user_id of privates) {
+        try {
+          const r = await oneBotPost('send_private_msg', { user_id, message })
+          if (r.ok) sent++
+          else failures.push({ target: `private:${user_id}`, ...r })
+        } catch (e) { failures.push({ target: `private:${user_id}`, ok: false, error: String(e?.message ?? e) }) }
+      }
+    }
+    if (failures.length) {
+      log(`OneBot 发送失败：${failures.length} 个目标/分段（成功 ${sent}）`)
+      return { ok: false, sent, failures: failures.slice(0, 3), body: { ok: false } }
+    }
+    return { ok: true, sent, body: { ok: true } }
+  }
+
+  /** 把发出去的评论/私信/简报投递到 QQ；失败只记日志，不影响 B 站这一轮。 */
   const notifyQQ = async (event) => {
+    if (qqOneBotMode()) return notifyOneBot(event)
     const configured = String(cfg.qqForwardUrl || '').trim()
     if (!configured) return { ok: false, skipped: 'no-url' }
     const urls = [configured]
@@ -762,7 +844,8 @@ export function apply(ctx, config) {
     description: '读 / 改「刷B站」的设置。不给 `patch` 就是读；给了就改（只认 schema 里的字段）。\n'
       + '例：`{"perDay":5,"peakValley":true,"noon":true,"night":true,"autoComment":false,"transcribe":false,"keywords":["DeepSeek Harness"]}`；'
       + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）。'
-      + 'QQ 转发：`{"qqForwardUrl":"http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward","qqForwardToken":"..."}`。',
+      + 'QQ 转发：`{"qqForwardUrl":"http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward","qqForwardToken":"..."}`。 '
+      + 'OneBot：`{"qqBackend":"onebot","qqForwardUrl":"http://127.0.0.1:3000","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。',
     parameters: { patch: { type: 'object', additionalProperties: true, description: '要改的字段（可省）' } },
     async execute(args) {
       let host = null
@@ -1706,7 +1789,7 @@ export function apply(ctx, config) {
       const patch = {}
       for (const k of ['perDay', 'peakValley', 'noon', 'night', 'autoComment', 'transcribe', 'asrModel',
         'commentPerRound', 'mentionName', 'dmMode', 'dmUid',
-        'keywords', 'pythonPath', 'dshBin', 'headlessProfile', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
+        'keywords', 'pythonPath', 'dshBin', 'headlessProfile', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
         if (k in body) patch[k] = body[k]
       }
       // ⭐ 范围钳制 + 两份都写（config.json / DSH 原生设置页），统一走 persistCfg —— 见文件上方

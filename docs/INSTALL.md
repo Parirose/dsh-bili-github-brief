@@ -118,6 +118,71 @@ napcat-plugin/
 
 改完重启 NapCat。通常不需要重启 QQ；如果实际环境要求重启 QQ，先询问用户。
 
+### NapCat 4.18.4x 的插件白名单
+
+NapCat 4.18.41 把官方插件白名单硬编码在 `napcat.mjs` 里，第三方插件会被静默拒载。日志通常出现在：
+
+```text
+<NapCat>/logs
+%ProgramData%\NapCatQQ Desktop\logs\bots\bots\<qq>.log
+```
+
+典型日志：
+
+```text
+[PluginLoader] Rejected napcat-plugin-dsh-bili-forward
+(napcat-plugin-dsh-bili-forward): not in official plugin whitelist
+[PluginManager] Scanned 0 plugins
+[PluginManager] Loaded 0 plugins
+```
+
+对应源码类似：
+
+```js
+const mge = new Set([
+  "napcat-plugin-builtin",
+  "napcat-plugin-cleaner",
+  "napcat-plugin-ssqq",
+  "napcat-plugin-qce"
+])
+```
+
+#### 路线 A：打白名单补丁
+
+在 `<NapCat>/napcat.mjs` 里把：
+
+```js
+"napcat-plugin-qce"
+```
+
+改成：
+
+```js
+"napcat-plugin-qce",
+"napcat-plugin-dsh-bili-forward"
+```
+
+- 必须用「无 BOM 的 UTF-8」写回
+- NapCatQQ Desktop 更新组件会覆盖 `napcat.mjs`，更新后要重新打一次
+
+#### 路线 B：不用 NapCat 插件
+
+改用 OneBot v11 直传后端，配置：
+
+```json
+{
+  "qqBackend": "onebot",
+  "qqForwardUrl": "http://127.0.0.1:3000",
+  "qqGroupIds": "123456789",
+  "qqPrivateIds": "10001",
+  "qqForwardToken": "optional"
+}
+```
+
+详见 `docs/CONFIG.md` 的 OneBot 小节。
+
+> NapCatQQ Desktop 的界面不会显示这条 white list warn，只能看上面的 bot 日志文件。
+
 ## 5. 配置 DSH 的 QQ 转发
 
 在 DSH 设置页填：
@@ -128,6 +193,8 @@ QQ 转发 Token：和 NapCat 插件里的 token 一致
 ```
 
 如果 NapCat WebUI 不是 6099，改成实际端口。
+
+如果使用 OneBot v11 直传，`qqForwardUrl` 填 OneBot HTTP base，并把 `qqBackend` 设为 `onebot`；见 `docs/CONFIG.md`。
 
 ## 6. 测试
 
@@ -144,4 +211,4 @@ QQ 转发 Token：和 NapCat 插件里的 token 一致
 - QQ 是否收到分段消息
 - B站是否没有发评论/私信
 
-确认后再打开每日定时。
+确认后再打开每日定时。

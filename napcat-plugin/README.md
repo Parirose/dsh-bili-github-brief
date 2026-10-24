@@ -33,6 +33,57 @@ NapCat 插件：接收 DSH 插件发出的 `brief_ready` 事件，把 B站 + Git
 
 示例见仓库根目录的 `examples/napcat-config.example.json`。
 
+## NapCat 4.18.4x 的插件白名单
+
+NapCat 4.18.41 会把官方插件白名单硬编码在 `napcat.mjs` 里，第三方插件会被静默拒载。日志：
+
+```text
+[PluginLoader] Rejected napcat-plugin-dsh-bili-forward
+(napcat-plugin-dsh-bili-forward): not in official plugin whitelist
+[PluginManager] Scanned 0 plugins
+[PluginManager] Loaded 0 plugins
+```
+
+NapCatQQ Desktop 界面不显示这条 warn，需要看：
+
+```text
+<NapCat>/logs
+%ProgramData%\NapCatQQ Desktop\logs\bots\bots\<qq>.log
+```
+
+### 路线 A：打白名单补丁
+
+在 `<NapCat>/napcat.mjs` 里把：
+
+```js
+"napcat-plugin-qce"
+```
+
+改成：
+
+```js
+"napcat-plugin-qce",
+"napcat-plugin-dsh-bili-forward"
+```
+
+必须用无 BOM 的 UTF-8 写回。NapCatQQ Desktop 更新组件会覆盖 `napcat.mjs`，更新后要重新打一次。
+
+### 路线 B：不用 NapCat 插件
+
+改用 OneBot v11 直传后端：
+
+```json
+{
+  "qqBackend": "onebot",
+  "qqForwardUrl": "http://127.0.0.1:3000",
+  "qqGroupIds": "123456789",
+  "qqPrivateIds": "10001",
+  "qqForwardToken": "optional"
+}
+```
+
+说明见仓库 `docs/CONFIG.md`。
+
 ## 配置
 
 ```json
@@ -93,4 +144,4 @@ x-dsh-bili-token: <token>
 }
 ```
 
-`parts` 会逐段发送；如果 `parts` 为空，则退回 `text`；两者都为空会返回 400，不会发空消息。
+`parts` 会逐段发送；如果 `parts` 为空，则退回 `text`；两者都为空会返回 400，不会发空消息。

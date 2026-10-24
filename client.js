@@ -26,7 +26,7 @@
  * ============================================================================
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-bili-scroll',
+  id: 'dsh-bili-github-brief',
   factory: (require) => {
     const React = require('react')
     const h = React.createElement

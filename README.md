@@ -39,6 +39,7 @@ English: A DSH + NapCat plugin that builds a daily AIGC brief from Bilibili and 
 - 本地完整 Markdown 报告
 - QQ 版按长度动态分段，每条 B站/GitHub 内容带纯 URL
 - NapCat 多群、多私聊、多段投递
+- QQ 投递支持 NapCat 插件或 OneBot v11 HTTP 直传
 - 每日定时开关，默认 09:00，默认关闭
 
 ## 仓库结构
@@ -185,4 +186,4 @@ QQ 转发 Token：和 NapCat 插件里的 token 一致
 
 ## License
 
-MIT。上游代码的版权声明和许可证保留在 `NOTICE.md` 与 `vendor/bilibili-mcp/LICENSE`。
+MIT。上游代码的版权声明和许可证保留在 `NOTICE.md` 与 `vendor/bilibili-mcp/LICENSE`。

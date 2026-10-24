@@ -23,7 +23,7 @@ console.log(`plugin root : ${root}`)
 console.log(`runner      : ${isElectron ? `electron ${process.versions.electron}` : `node ${process.version}`}`)
 console.log('')
 
-console.log('[1/3] bundle 挂载声明')
+console.log('[1/4] bundle 挂载声明')
 let pkgName = ''
 try {
   pkgName = String(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).name || '')
@@ -48,7 +48,18 @@ for (const name of declaredNames) {
   else bad(`name: ${name} != 包名 ${pkgName} —— 加载时会 ERR_MODULE_NOT_FOUND，整条插件不激活`)
 }
 
-console.log('[2/3] 命名空间（id <-> export const name）')
+console.log('[2/4] client 注册 id')
+try {
+  const src = readFileSync(join(root, 'client.js'), 'utf8')
+  const m = /window\.__ModuleLoader__\.load\(\{\s*id:\s*['"]([^'"]+)['"]/.exec(src)
+  const clientId = m ? m[1] : ''
+  if (clientId) {
+    if (clientId === pkgName) ok(`client.js id: ${clientId} 与包名一致`)
+    else bad(`client.js id: ${clientId} != 包名 ${pkgName} —— 桌面版会 duplicate factory registration，可能触发 profile 回滚`)
+  } else warn('client.js 里没找到 window.__ModuleLoader__.load({ id: ... })')
+} catch (e) { bad(`读不到 client.js：${e?.message ?? e}`) }
+
+console.log('[3/4] 命名空间（id <-> export const name）')
 let modName = ''
 try {
   const src = readFileSync(join(root, 'index.js'), 'utf8')
@@ -63,7 +74,7 @@ for (const id of declaredIds) {
   else bad(`id: ${id} != export const name ${modName} —— 设置页会缺`)
 }
 
-console.log('[3/3] 宿主依赖')
+console.log('[4/4] 宿主依赖')
 try {
   const { candidateRoots, loadHostDeps } = await import(pathToFileURL(join(root, 'lib', 'hostdeps.mjs')).href)
   const roots = candidateRoots()

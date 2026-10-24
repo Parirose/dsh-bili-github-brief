@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2
+
+### Fixed
+- `client.js` 注册 id 改成真实包名 `dsh-bili-github-brief`，避免桌面版 duplicate factory registration 和 profile 回滚
+- `docs/INSTALL.md` / `napcat-plugin/README.md`：补 NapCat 4.18.4x 的官方插件白名单与绕行路线
+- `docs/TROUBLESHOOTING.md`：补 DSH Low 完整性标签、NapCatQQ Desktop 安装 QQ 的 os error 5
+
+### Added
+- OneBot v11 直传后端：`qqBackend: "onebot"`，复用现有分段、去重和 token 逻辑
+
 ## 0.1.1
 
 ### Fixed
@@ -21,4 +31,4 @@
 - 本地 Markdown 报告
 - QQ 动态分段，每条带纯 URL
 - NapCat brief_ready 多群/多私聊投递
-- 关闭 B站私信，保持 B站只读
+- 关闭 B站私信，保持 B站只读

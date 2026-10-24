@@ -12,8 +12,11 @@
 | `scheduleEnabled` | false | 每日定时开关 |
 | `scheduleTime` | 09:00 | 每日运行时间 |
 | `dmMode` | off | 必须保持 off，本项目不发 B站私信 |
-| `qqForwardUrl` | 空 | NapCat 插件转发地址 |
-| `qqForwardToken` | 空 | 和 NapCat 插件 token 一致 |
+| `qqBackend` | napcat-plugin | QQ 投递后端：`napcat-plugin` / `onebot` |
+| `qqForwardUrl` | 空 | NapCat 插件转发地址，或 OneBot HTTP base |
+| `qqForwardToken` | 空 | NapCat 插件 token，或 OneBot Bearer token |
+| `qqGroupIds` | 空 | OneBot 群号，英文逗号分隔 |
+| `qqPrivateIds` | 空 | OneBot 私聊 QQ，英文逗号分隔 |
 | `keywords` | 空 | 固定关键词，一行一个 |
 | `perDay` | 10 | 每日最多挑几条 |
 | `transcribe` | false | 无字幕时是否本地转写 |
@@ -58,6 +61,26 @@ NapCat 插件配置：
 - `token`：必须和 DSH 里的 `qqForwardToken` 一致
 - `forwardBriefs`：必须为 true
 
+### OneBot v11 直传（不经过 NapCat 插件）
+
+如果 NapCat 4.18.4x 的白名单不让第三方插件加载，可以直接走 OneBot v11 HTTP。
+
+```json
+{
+  "qqBackend": "onebot",
+  "qqForwardUrl": "http://127.0.0.1:3000",
+  "qqGroupIds": "123456789",
+  "qqPrivateIds": "10001",
+  "qqForwardToken": "optional"
+}
+```
+
+- `qqForwardUrl` 填 OneBot HTTP 服务的 base，不要带 `/send_group_msg`
+- DSH 会自动请求 `<base>/send_group_msg` 和 `<base>/send_private_msg`
+- `qqGroupIds` / `qqPrivateIds` 用英文逗号分隔
+- `qqForwardToken` 非空时作为 `Authorization: Bearer <token>` 发送
+- 默认值 `qqBackend: "napcat-plugin"`，老配置不需要改
+
 ## 定时
 
 ```text
@@ -66,4 +89,4 @@ NapCat 插件配置：
 时间：09:00
 ```
 
-默认关闭。建议先手动跑 1 到 3 天。
+默认关闭。建议先手动跑 1 到 3 天。
