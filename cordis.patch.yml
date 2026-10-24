@@ -14,7 +14,7 @@
 
 - insert:
     - id: bili-scroll
-      name: dsh-bili-scroll
+      name: dsh-bili-github-brief
       config:
         # 真正的用户配置在插件自己的 config 里（设置页可改），这里只放默认值
         enabled: true

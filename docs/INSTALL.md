@@ -23,6 +23,53 @@ dsh plugin --profile web add link:<本项目绝对路径>
 
 安装后必须重启 DSH。
 
+### 桌面版（Electron 打包的 DSH NEXT）
+
+桌面版没有 `web` profile，且 `desktop` profile 被 CLI 锁死，两条 `dsh plugin` 命令都会失败：
+
+```text
+dsh: error: profile "desktop" is managed exclusively by the Electron application
+```
+
+桌面版只能走应用自带的 headless adapter，参数顺序是 `<profile> <pnpm 参数...>`（不带 `--profile`）：
+
+```powershell
+$env:ELECTRON_RUN_AS_NODE = '1'
+& 'C:\DSH NEXT\DSH NEXT.exe' 'C:\DSH NEXT\resources\app.asar\lib\plugin-cli.js' `
+  desktop add "link:D:\path\to\dsh-bili-github-brief"
+```
+
+它做的是同一件事：pnpm add 进 `$DSH_HOME/profiles/desktop/`，并把包名追加进 `package.json` 的 `dsh.profile.bundles`。装完照样要重启应用。
+
+macOS/Linux 换成 `<App>/Contents/Resources/app.asar/lib/plugin-cli.js`、`.../resources/app.asar/lib/plugin-cli.js`。
+
+### 先建 headless profile
+
+插件跑一轮用的是 `--profile headless`，桌面版默认没有这个 profile，不先建，第一次「现在跑一轮」会以找不到 profile 结束。跑一次 list 即初始化：
+
+```powershell
+& '<app>/DSH NEXT.exe' '<app>/resources/app.asar/lib/plugin-cli.js' headless list
+```
+
+而 headless 那一轮也要能拿到模型：供应商/默认模型写到 **home 层 patch**（`$DSH_HOME/cordis.patch.yml`），才会同时作用于 desktop 和 headless。
+
+### 宿主依赖自检
+
+安装或升级后，在插件目录运行：
+
+```powershell
+node scripts/verify-host.mjs
+```
+
+桌面版用 Electron 再跑一次（能读 `app.asar` 的是这条）：
+
+```powershell
+$env:ELECTRON_RUN_AS_NODE = '1'
+& '<app>\DSH NEXT.exe' scripts\verify-host.mjs
+```
+
+看到 `schemastery 取到了` 和 `dsh-tools：从宿主树取到` 才算完整。
+
 ## 2. 装 B站依赖并登录
 
 重启 DSH 后：

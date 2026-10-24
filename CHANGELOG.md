@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1
+
+### Fixed
+- 桌面版（DSH NEXT / Electron）装完不激活：`cordis.patch.yml` 的 `name` 与包名不一致
+- 桌面版取不到宿主 `schemastery` / `dsh-tools`：宿主包在 `app.asar` 内，`candidateRoots()` 现在会从 `process.resourcesPath` / `process.execPath` 推导 asar 路径
+- 更新检查与一键升级指向本项目自身，而不是上游仓库
+
+### Added
+- `scripts/verify-host.mjs`：装后自检（包名一致性 / 命名空间绑定 / 宿主依赖可达）
+- `docs/INSTALL.md`：桌面版安装路径、headless profile 前置条件
+
 ## 0.1.0
 
 - 初始独立版本
