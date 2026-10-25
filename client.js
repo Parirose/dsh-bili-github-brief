@@ -403,6 +403,14 @@ window.__ModuleLoader__.load({
               + '插件会以这里的设置为准，功能照常；只是 DSH 自带的那页看不到这些值。')
           : null,
 
+        /* ⭐ 2026-10-25：降级状态（degraded）⇒ 面板必须红字告诉他，别装一切正常。
+           目前只有一项：mcp-off（overlayMcp=false）⇒ 那一轮 0 个工具，报告必空。
+           这里只提示，**不自动改回 true、也不阻止跑**（排障时允许故意关）。 */
+        (st && Array.isArray(st.degraded) && st.degraded.includes('mcp-off'))
+          ? h('div', { 'data-bd-msg': '', 'data-warn': '' },
+              '⚠️ MCP 已关（overlayMcp = false）—— 这一轮没有任何 B站/GitHub 工具，跑出来的报告会是空的。把 overlayMcp 改回 true 再跑。')
+          : null,
+
         /* ── 定时 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '什么时候自己跑'),
