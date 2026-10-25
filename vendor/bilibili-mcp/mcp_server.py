@@ -15,6 +15,7 @@ B站数据采集 MCP 服务，支持 OpenClaw / Claude Code / Cursor / Cline
 #      ④ `bili_comments` 把抓取异常带进返回（风控 -412 不再伪装成"这条视频 0 条评论"）
 #      ⑤ `bili_reply` 回执带上 `rpid` / `rpid_str` / `root` / `parent`（判重表与评论复核要用）
 #      ⑥ `bili_subtitle` 把 TLS 信任失败单独包成 `tls_untrusted_ca`；`bili_video_info` 用 `get_tags()` 补标签
+#      ⑦ `bili_subtitle` TLS 异常自动重试一次，且下载字幕时默认 / certifi 两种信任链都试
 import asyncio
 import json
 import base64
@@ -445,6 +446,58 @@ def _is_tls_error(e: Exception) -> bool:
     )
 
 
+def _ssl_contexts():
+    """下载字幕用的信任链候选：先用默认（装了 pip-system-certs 就是 OS 根存储），
+    再用 certifi 那份。2026-10-25 实测：同一台机上两种路径都能 200，
+    但 OS 根存储会有瞬时抖动 ⇒ 两条都试一下最稳。"""
+    out = [("默认 context", None)]
+    try:
+        import certifi
+        out.append(("certifi", ssl.create_default_context(cafile=certifi.where())))
+    except Exception as e:
+        print(f"[bili-mcp] certifi context 准备不了（不影响主流程）: {e}", file=sys.stderr)
+    return out
+
+
+async def _fetch_subtitle_json(url: str) -> dict:
+    """下载字幕 JSON。TLS 信任失败就换下一种信任链再试；其它错误直接上抛。"""
+    import aiohttp
+    last = None
+    for label, ctx in _ssl_contexts():
+        try:
+            connector = aiohttp.TCPConnector(ssl=ctx) if ctx is not None else None
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=25)) as resp:
+                    resp.raise_for_status()
+                    return await resp.json(content_type=None)
+        except Exception as e:
+            last = e
+            if not _is_tls_error(e):
+                raise
+            print(f"[bili-mcp] 字幕下载 TLS 失败（{label}），换下一种信任链", file=sys.stderr)
+    raise last
+
+
+async def _bili_subtitle_with_retry(bvid: str, times: int = 2) -> str:
+    """TLS 失败自动重试。
+
+    为什么需要：2026-10-25 实测，同一台机、同一个 venv、同一分钟内，
+    最开始两次 bili_subtitle 报 tls_untrusted_ca，之后 7 次全部成功 ——
+    不是根证书缺失，是信任存储的瞬时抖动。不重试的话，模型会把这次偶发
+    当成全局故障，在中间推理里写下字幕接口 SSL 全失败。
+    """
+    tries = max(1, int(times))
+    for i in range(tries):
+        try:
+            return await _bili_subtitle_impl(bvid)
+        except Exception as e:
+            if i == tries - 1 or not _is_tls_error(e):
+                raise
+            print(f"[bili-mcp] 字幕 TLS 抖了一下（{type(e).__name__}），0.6s 后重试", file=sys.stderr)
+            await asyncio.sleep(0.6)
+    raise RuntimeError("unreachable")
+
+
 async def _bili_subtitle_impl(bvid: str) -> str:
     cred = get_cred()
     v = video.Video(bvid=bvid, credential=cred)
@@ -472,15 +525,12 @@ async def _bili_subtitle_impl(bvid: str) -> str:
     if not target:
         target = subtitles[0]
 
-    # 下载字幕
-    import aiohttp
+    # 下载字幕（默认 / certifi 两种信任链都试，见 _fetch_subtitle_json）
     sub_url = target.get("subtitle_url", "")
     if sub_url.startswith("//"):
         sub_url = "https:" + sub_url
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(sub_url) as resp:
-            sub_data = await resp.json()
+    sub_data = await _fetch_subtitle_json(sub_url)
 
     texts = [item.get("content", "") for item in sub_data.get("body", [])]
     full_text = "\n".join(texts)
@@ -506,13 +556,14 @@ async def bili_subtitle(bvid: str) -> str:
         视频的完整字幕文本
     """
     try:
-        return await _bili_subtitle_impl(bvid)
+        return await _bili_subtitle_with_retry(bvid)
     except Exception as e:
         if _is_tls_error(e):
             return json.dumps({
                 "bvid": bvid,
                 "error": "tls_untrusted_ca",
-                "hint": "根证书缺失：在插件家目录运行 .venv/Scripts/pip install pip-system-certs，然后重启 DSH",
+                "hint": "已重试仍失败：要么没装 pip-system-certs，要么这台机器缺根证书。"
+                        "在插件家目录跑 .venv/Scripts/pip install pip-system-certs，然后重启 DSH",
             }, ensure_ascii=False)
         raise
 
