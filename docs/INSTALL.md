@@ -76,7 +76,12 @@ node scripts/migrate-model-layer.mjs
 
 ```powershell
 node scripts/verify-host.mjs
+node scripts/smoke-apply.mjs
 ```
+
+`smoke-apply` 用假 ctx 真跑一遍 `apply()`（冷启动 / 老配置 / 显式 off / Settings 已就绪）。
+`node --check` 只查语法，查不出 `Cannot access 'x' before initialization` 这类初始化顺序错误 ——
+v0.1.4 就是这么崩的，所以这条必须跑。
 
 桌面版用 Electron 再跑一次（能读 `app.asar` 的是这条）：
 

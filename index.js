@@ -323,6 +323,22 @@ export function apply(ctx, config) {
   const loadCfg = () => {
     const saved = savedCfg()
     const row = settingsDesc()
+    // ⚠️ 2026-10-18（用户实证 + 他的 dsh 定位）：`pythonPath` 是**装依赖时自动写的**，
+    //    但它一旦在 DSH 原生设置里有过值（默认 "python"），就会被宿主覆盖回来 ⇒
+    //    「重装依赖」日志写着"已把 pythonPath 设为 venv"，实际生效的还是系统那个空壳 python
+    //    ⇒ 画二维码 import 不到 qrcode ⇒ **永远不出码** ✗
+    //    ⇒ 这个键不让宿主对账（它由插件自己算出来，不该被界面上的旧值压住）
+    const ov = readOverride()   // 本地刚存、宿主没同步成功的键 ⇒ 以本地为准
+    const touched = new Set([
+      ...touchedKeys,            // 用户在我们面板里保存过的键（0.1.11 的判据）
+      ...Object.keys(ov),
+      'pythonPath',              // 插件自己算出来的路径
+      // ⭐ 2026-10-19（一位用户的 dsh 分析出来的）：桌面版 0.2.x 里，写进 cordis.patch.yml 的设置
+      //    不会热刷新到正在运行的实例 ⇒ 我们从 ctx 读到的那份 config 一直是挂载时的旧默认值
+      //    ⇒ 只要某个键"config.json 里的值和默认值不一样"，就说明有人显式设过它，必须以本地为准，
+      //    否则在桌面版上会被那份旧默认值压回（用户看到的就是"开关自己弹回去"）
+      ...Object.keys(DEFAULTS).filter((k) => JSON.stringify(saved[k]) !== JSON.stringify(DEFAULTS[k])),
+    ])
     // ⭐ 老配置兼容：以前没有 qqBackend，只填了 qqForwardUrl 就代表 NapCat 插件投递。
     //    新默认是 off；只有「两边都没显式写过 qqBackend」时才按老配置推断，用户后来亲手选 off 不会被改回来。
     const applyLegacyQQBackend = (out, user) => {
@@ -341,22 +357,7 @@ export function apply(ctx, config) {
     //    桌面版里它是挂载时的快照，之后写进 `cordis.patch.yml` 的值不会热刷新进来 ✗
     //    ⇒ 用 `describe()` 这一行里的 `value`（当前 patch 解析出来的现值）当基准，拿不到才退回 `config` ✓
     const out = normalize(row.value && typeof row.value === 'object' ? row.value : config, { ...DEFAULTS })
-    // ⚠️ 2026-10-18（用户实证 + 他的 dsh 定位）：`pythonPath` 是**装依赖时自动写的**，
-    //    但它一旦在 DSH 原生设置里有过值（默认 "python"），就会被宿主覆盖回来 ⇒
-    //    「重装依赖」日志写着"已把 pythonPath 设为 venv"，实际生效的还是系统那个空壳 python
-    //    ⇒ 画二维码 import 不到 qrcode ⇒ **永远不出码** ✗
-    //    ⇒ 这个键不让宿主对账（它由插件自己算出来，不该被界面上的旧值压住）
-    const ov = readOverride()   // 本地刚存、宿主没同步成功的键 ⇒ 以本地为准
-    const touched = new Set([
-      ...touchedKeys,            // 用户在我们面板里保存过的键（0.1.11 的判据）
-      ...Object.keys(ov),
-      'pythonPath',              // 插件自己算出来的路径
-      // ⭐ 2026-10-19（一位用户的 dsh 分析出来的）：桌面版 0.2.x 里，写进 cordis.patch.yml 的设置
-      //    不会热刷新到正在运行的实例 ⇒ 我们从 ctx 读到的那份 config 一直是挂载时的旧默认值
-      //    ⇒ 只要某个键"config.json 里的值和默认值不一样"，就说明有人显式设过它，必须以本地为准，
-      //    否则在桌面版上会被那份旧默认值压回（用户看到的就是"开关自己弹回去"）
-      ...Object.keys(DEFAULTS).filter((k) => JSON.stringify(saved[k]) !== JSON.stringify(DEFAULTS[k])),
-    ])
+    // ⚠️ `ov` / `touched` 已整体上移到上面（见 loadCfg 开头）——applyLegacyQQBackend 要用它们。
     // ⭐ 2026-10-19：把"插件这份和 DSH 原生设置那份不一样、且以插件为准"的键记下来 ——
     //   只记不吵（每台机器每种组合只写一行日志），`/status` 里也能看到，排查时一眼够用
     const diff = []

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.5
+
+### Fixed
+- 修 0.1.4 冷启动 TDZ：`loadCfg()` 里 `applyLegacyQQBackend` 引用了后面才声明的 `touched`，
+  Settings 服务未就绪（`row === null`）时会先走那条 return ⇒
+  `ReferenceError: Cannot access 'touched' before initialization` ⇒ 日志 `1 entry did not activate`
+  ⇒ 插件所有 HTTP 路由不存在 ⇒ 设置面板「读不到插件配置」
+- `ov` / `touched` 整体上移到 `settingsDesc()` 之后、`applyLegacyQQBackend` 之前
+
+### Added
+- `scripts/smoke-apply.mjs`：用假 ctx 真跑一遍 `apply()`（冷启动 / 老配置兼容 / 显式 off / Settings 已就绪），
+  专门防这类「声明顺序 / TDZ」回归——`node --check` 只查语法，查不出这种错
+
 ## 0.1.4
 
 ### Breaking

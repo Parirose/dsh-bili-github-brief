@@ -92,7 +92,11 @@ overlay，不会写回 profile/home。**不要写 `$DSH_HOME/cordis.patch.yml`**
 ```powershell
 node scripts/migrate-model-layer.mjs
 node scripts/verify-host.mjs
+node scripts/smoke-apply.mjs
 ```
+
+`smoke-apply` 会用假 ctx 真跑一遍 `apply()`，专门抓「声明顺序 / TDZ」这类
+`node --check` 查不出来的初始化错误（v0.1.4 的冷启动崩溃就是这一类）。
 
 > 本项目的 DSH 内部插件 id 仍为 `bili-scroll`，方便从现有 `dsh-bili-scroll` 配置迁移。不要和上游 `dsh-bili-scroll` 同时安装。
 
