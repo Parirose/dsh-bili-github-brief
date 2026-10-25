@@ -1918,7 +1918,9 @@ export function apply(ctx, config) {
       githubTokenSet: Boolean(String(cfg.githubToken || '').trim()),
       scheduleEnabled: cfg.scheduleEnabled === true,
       scheduleTime: cfg.scheduleTime || '09:00',
-      nextRunAt: nextScheduleAt(),
+      // ⚠️ 2026-10-25：非日报模式下 tick() 根本不看 scheduleEnabled/scheduleTime ⇒
+      //    别给面板一个“下次运行”的假时间（那个时间根本不会发生）。
+      nextRunAt: cfg.briefMode !== false ? nextScheduleAt() : null,
       // 2026-10-18：这几项"本地存了、但没能同步到 DSH 原生设置" ⇒ 设置页要告诉用户
       // （DSH 0.2.1 某些启动方式会拒写：profile reload requires the root Include entry）
       notSynced: Object.keys(readOverride()),

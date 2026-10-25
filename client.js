@@ -376,6 +376,10 @@ window.__ModuleLoader__.load({
       }
 
       const sw = (k) => Boolean(cfg[k])
+      // ⭐ 2026-10-25：日报模式与峰谷模式的调度是**互斥**的（见 index.js 的 tick）：
+      //    brief 分支只看 scheduleEnabled/scheduleTime；非 brief 分支只看 peakValley/noon/night。
+      //    面板上两段都渲染会让人以为那个开关管用 ⇒ 按模式置灰 + 文案说实话。
+      const briefOn = sw('briefMode')
 
       return h('div', { 'data-bd-page': '' },
 
@@ -404,11 +408,15 @@ window.__ModuleLoader__.load({
           h('div', { 'data-bd-h': '' }, '什么时候自己跑'),
           h(ToggleRow, {
             label: '峰谷时段自动刷',
-            note: '只在谷时跑 —— 工作日 12:00–14:00 与 18:00 之后（整个周末也算谷时）；关了就只能手动跑',
+            note: briefOn
+              ? '⚠️ 日报模式（上面「启用合并简报」开着）下这项不生效 —— 日报模式只认下面的「每日定时」。要按峰谷跑，先关掉合并简报。'
+              : '只在谷时跑 —— 工作日 12:00–14:00 与 18:00 之后（整个周末也算谷时）；关了就只能手动跑',
             on: sw('peakValley'),
+            disabled: briefOn,
             onChange: (v) => patch({ peakValley: v }, '峰谷时段自动刷'),
           }),
-          sw('peakValley') ? h('div', { 'data-bd-sub': '' },
+          briefOn ? h('div', { 'data-bd-note': '' }, '日报模式的调度由下面的「每日定时」负责。') : null,
+          (!briefOn && sw('peakValley')) ? h('div', { 'data-bd-sub': '' },
             ...['noon', 'night'].map((k) => h(ToggleRow, {
               key: k,
               label: win[k].label,
@@ -458,11 +466,14 @@ window.__ModuleLoader__.load({
           }),
           h(ToggleRow, {
             label: '启用每日定时',
-            note: '默认关闭；开启后每天在下面这个时间跑一轮。',
+            note: briefOn
+              ? '默认关闭；开启后每天在下面这个时间跑一轮。'
+              : '⚠️ 非日报模式（「合并简报」关着）下这项不生效 —— 非日报模式按上面的峰谷窗口跑。',
             on: sw('scheduleEnabled'),
+            disabled: !briefOn,
             onChange: (v) => patch({ scheduleEnabled: v }, '每日定时'),
           }),
-          sw('scheduleEnabled') ? h('div', { 'data-bd-sub': '' },
+          (briefOn && sw('scheduleEnabled')) ? h('div', { 'data-bd-sub': '' },
             h('div', { 'data-bd-label': '' }, '每天几点跑'),
             h('input', {
               'data-bd-input': '', type: 'time',
@@ -476,7 +487,7 @@ window.__ModuleLoader__.load({
             }),
             h('div', { 'data-bd-note': '' }, '默认 09:00（Asia/Shanghai）；关掉上面的开关就只手动跑。')
           ) : null,
-          st.nextRunAt ? h('div', { 'data-bd-note': '' }, `下次运行：${new Date(st.nextRunAt).toLocaleString('zh-CN')}`) : null
+          (briefOn && st.nextRunAt) ? h('div', { 'data-bd-note': '' }, `下次运行：${new Date(st.nextRunAt).toLocaleString('zh-CN')}`) : null
         ),
 
         /* ── 一轮挑几条 ── */
