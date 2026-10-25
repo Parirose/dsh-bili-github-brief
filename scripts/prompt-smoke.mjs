@@ -9,6 +9,9 @@
  *   唯一能防住它的是：把模板真的渲染一遍，断言人设关键词在里面。
  * ============================================================================
  */
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { renderBriefPrompt } from '../lib/prompt.mjs'
 
 const SENTINEL = 'ATRI_SENTINEL_9f3'
@@ -80,6 +83,35 @@ QQ：{{QQ_PATH}}
   else bad('D: 空模板兜底里人设丢了（多半是先追加、后判空的顺序问题）')
   if (out.includes('B站 + GitHub AIGC 情报员') && out.includes('这些规则优先')) ok('D: 空模板走了兜底文案')
   else bad('D: 空模板没走兜底文案')
+}
+
+// E. 真模板（prompts/brief-prompt.txt）的四条断言
+//    —— 上一轮实测：人设读到了、配额也执行了，但输出全是机构口吻
+//    ⇒ 光“人设在提示词里”不够，还要抠两件事：身份得在前、语气得有硬落点。
+{
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const realTpl = readFileSync(join(root, 'prompts', 'brief-prompt.txt'), 'utf8')
+  const out = renderBriefPrompt({
+    ...base,
+    template: realTpl,
+    ownerBlock: '===== 设定 =====\n' + SENTINEL + '\n===== 结束 =====',
+  })
+
+  // E1：不允许回退到“身份声明在最前面”的旧模板
+  if (!out.includes('你是我的 B站 + GitHub AIGC 情报员。')) ok('E1: 没有“你是我的…情报员”这句身份声明')
+  else bad('E1: 旧身份声明又回来了（会压住 AGENTS.md 里的人设）')
+
+  // E2：人设块必须在“进入身份”那句之前（用 indexOf 比先后，“包含”证明不了顺序）
+  const iOwner = out.indexOf(SENTINEL)
+  const iEnter = out.indexOf('先按上面那份设定进入身份')
+  if (iOwner >= 0 && iEnter >= 0 && iOwner < iEnter) ok('E2: 人设块在“进入身份”那句之前')
+  else bad(`E2: 顺序不对（owner@${iOwner}, enter@${iEnter}）—— 身份声明会压住人设`)
+
+  // E3 / E4：语气的硬落点（报告与 QQ 版）
+  if (out.includes('必须用设定里那个身份的口吻写')) ok('E3: 「今日结论」有语气硬落点')
+  else bad('E3: 「今日结论」没有语气要求（改 2 没落地）')
+  if (out.includes('QQ 版第一段用设定里那个身份')) ok('E4: QQ 版有开场口吻要求')
+  else bad('E4: QQ 版没有开场口吻要求（改 2 没落地）')
 }
 
 console.log('')

@@ -105,6 +105,8 @@ export const Config = !z ? undefined : z.object({
   guiProfile: z.string().default('desktop').extra('volatile', true),
   /** 可选：直接指定一份含 llm-pi-ai / agent-default-model 的 patch 文件 */
   modelLayerFile: z.string().default('').extra('volatile', true),
+  /** 多宿主共存时填一个独立目录名（例 bili-duty-web）；留空 = 旧的 bili-duty */
+  stateDir: z.string().default('').extra('volatile', true),
   /** 跑 headless 时的工作目录 */
   workspace: z.string().default('').extra('volatile', true),
   /** 日报形态：full=完整（现状）· brief=每条一两行 · off=不写报告（只发评论） */
@@ -137,7 +139,21 @@ export function apply(ctx, config) {
     try { myVer = String(JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8')).version || '') } catch { myVer = '' }
     return myVer
   }
-  const stateDir = stateDirOf(ctx)
+  // ⭐ 2026-10-25：家目录可隔离（多宿主共存）。
+  //    ⚠️ 先有鸡还是先有蛋：配置就在家目录里，而家目录取决于配置里的 stateDir ⇒
+  //    这个键**只从默认那份 config.json**（或环境变量）读，之后一切走新家。
+  //    默认留空 ⇒ 路径与以前完全一致（老用户零迁移）。
+  const defaultStateDir = stateDirOf(ctx)
+  const bootStateDirName = (() => {
+    const fromEnv = String(process.env.BILI_DUTY_STATE_DIR || '').trim()
+    if (fromEnv) return fromEnv
+    try {
+      const c = JSON.parse(readFileSync(join(defaultStateDir, 'config.json'), 'utf8'))
+      return String((c && c.stateDir) || '').trim()
+    } catch { return '' }
+  })()
+  const stateDir = bootStateDirName ? stateDirOf(ctx, { dirName: bootStateDirName }) : defaultStateDir
+  const stateDirName = stateDir === defaultStateDir ? 'bili-duty' : bootStateDirName
   /**
    * ⚠️ 2026-10-19（用户 `天文星球` 的截图）：装转写依赖时 uv 直接 exit 2 ——
    *   `error: Could not acquire lock / failed to open file C:\Users\AP\AppData\Local\uv\cache\.lock: 拒绝访问 (os error 5)`
@@ -223,7 +239,7 @@ export function apply(ctx, config) {
   const DEFAULTS = {
     perDay: 5, peakValley: false, noon: true, night: true, autoComment: false, transcribe: false, asrModel: 'small',
     dmMode: 'off', dmUid: 0, qqForwardUrl: '', qqForwardToken: '', qqBackend: 'off', qqGroupIds: '', qqPrivateIds: '', briefMode: true, githubEnabled: true, githubToken: '', githubDiscover: true, workflowScan: true, scheduleEnabled: false, scheduleTime: '09:00',
-    keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, overlayModel: true, guiProfile: 'desktop', modelLayerFile: '', workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
+    keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, overlayModel: true, guiProfile: 'desktop', modelLayerFile: '', stateDir: '', workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -265,6 +281,11 @@ export function apply(ctx, config) {
     if ('overlayModel' in p) p.overlayModel = Boolean(p.overlayModel)
     if ('guiProfile' in p) p.guiProfile = String(p.guiProfile || '').trim() || 'desktop'
     if ('modelLayerFile' in p) p.modelLayerFile = String(p.modelLayerFile || '').trim()
+    if ('stateDir' in p) {
+      const v = String(p.stateDir || '').trim()
+      // 只允许单层目录名（不能带路径分隔符）⇒ 写错了就当没填，别把家搬到奇怪的地方
+      p.stateDir = v && !/[\\/]/.test(v) && v !== '.' && v !== '..' ? v : ''
+    }
     if ('githubToken' in p) p.githubToken = String(p.githubToken || '').trim()
     if ('scheduleTime' in p) {
       const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(p.scheduleTime || '').trim())
@@ -380,6 +401,10 @@ export function apply(ctx, config) {
     return clampPatch(out)
   }
   const cfg = loadCfg()
+  // ⭐ stateDir 是**启动时**定的（否则配置与家目录会互相依赖）。运行中改它只能重启生效 ⇒ 至少说一句。
+  if (String(cfg.stateDir || '').trim() && String(cfg.stateDir).trim() !== stateDirName) {
+    log(`设置里的 stateDir=「${cfg.stateDir}」与当前家目录「${stateDirName}」不一致 ⇒ 改这个键要重启 DSH 才生效`)
+  }
   // ⭐ 配置是"随时可能被设置页就地改掉"的东西 ⇒ 每个入口用之前重算一遍（cfg 这个对象要一直指向同一份）
   const refreshCfg = () => { Object.assign(cfg, loadCfg()) }
   const saveCfg = (patch) => {
@@ -1467,18 +1492,23 @@ export function apply(ctx, config) {
       try {
         const st = readJson(dutyStateFile, {})
         const prev = st.day === dayKey() ? Number(st.picked || 0) : 0
-        const picked = countPickedToday()   // 报告是事实来源、state 只是兜底（跟闸门同一个算法）
+        // ⚠️ 2026-10-25：这里以前拿 countPickedToday()（= max(state.picked, 报告条数）当“报告里有几条”用 ✗
+        //    它是**全天累计、只增不减**的，所以报告只写了 5 条也会说“报告里 10 条”；
+        //    而且以前那句“已按上限关注前 N 条”是**假的** —— 插件从来没裁剪过内容。
+        //    现在：报告条数归报告条数，全天累计归全天累计，话说实话。
+        const reportPicks = countPicks(reportFileOf(new Date()))   // 本次报告实际条目
+        const picked = Math.max(prev, reportPicks)                 // 全天累计（与闸门同一算法）
         const quota = Math.max(0, Number(cfg.perDay) || 0)
         if (picked > prev) { bumpState({ picked }); log(`今天挑到 ${picked} 条（上限 ${quota} 条）`) }
         if (picked > quota) {
-          log(`⚠️ 超出每日上限：报告里 ${picked} 条 > perDay ${quota}（提示词没拦住，下一轮闸门会按 0 额度处理）`)
+          log(`⚠️ 超出全天额度：今天累计 ${picked} 条 > perDay ${quota}（本次报告 ${reportPicks} 条；累计只增不减，模型主动收敛也不还额度）`)
           try {
             const qqFile = join(outDir, `${dayKey()}.qq.md`)
             if (existsSync(qqFile)) {
               const old = readFileSync(qqFile, 'utf8')
-              const marker = '⚠️ 这份日报超出每日上限'
+              const marker = '⚠️ 今天累计已挑'
               if (!old.includes(marker)) {
-                appendFileSync(qqFile, `\n---\n${marker}（${picked}/${quota}），已按上限关注前 ${quota} 条。\n`, 'utf8')
+                appendFileSync(qqFile, `\n---\n${marker} ${picked} 条，超过上限 ${quota}；本次报告 ${reportPicks} 条。\n`, 'utf8')
               }
             } else {
               log('QQ 版不存在，超限提示只写进日志')
@@ -1507,9 +1537,28 @@ export function apply(ctx, config) {
    *    （`dsh: fatal uncaught exception`）。⇒ **定时器回调必须自己兜住所有异常**：
    *    插件再错也只该"这一轮没跑成"，绝不该杀宿主。
    */
+  // ⭐ 2026-10-25：多宿主互斥。同一台机上桌面版与 web 版各跑一个宿主时，
+  //    即使 stateDir 没隔离开，也别两边同时跑一轮（会互相覆盖报告、各推一份 QQ）。
+  //    做法：state.json 里写心跳 host{pid,profile,at}；5 分钟内别人还在就跳过。
+  let lastOtherHostSkip = ''
+  const otherHostAlive = (st) => {
+    const h = (st && st.host) || {}
+    const at = Date.parse(h.at || '')
+    return Boolean(h.pid) && h.pid !== process.pid && Number.isFinite(at) && (Date.now() - at) < 5 * 60 * 1000
+  }
   const tick = () => {
     try {
       refreshCfg()                    // ⭐ 定时器活得比设置页久：每一跳都重新读一遍配置
+      const stHost = readJson(dutyStateFile, {})
+      if (otherHostAlive(stHost)) {
+        const sig = `${stHost.host.pid}@${stHost.host.at}`
+        if (sig !== lastOtherHostSkip) {
+          lastOtherHostSkip = sig
+          log(`另一个宿主在跑（profile=${stHost.host.profile || '?'}, pid=${stHost.host.pid}），本轮跳过`)
+        }
+        return
+      }
+      bumpState({ host: { pid: process.pid, profile: String(cfg.headlessProfile || ''), at: new Date().toISOString() } })
       if (cfg.briefMode !== false) {
         if (cfg.scheduleEnabled === true) {
           const now = new Date()
@@ -1907,6 +1956,7 @@ export function apply(ctx, config) {
     return {
       ok: true,
       home: stateDir,
+      stateDirName,
       config: publicCfg(),
       windows: WINDOWS,
       today,
@@ -1966,7 +2016,7 @@ export function apply(ctx, config) {
       const patch = {}
       for (const k of ['perDay', 'peakValley', 'noon', 'night', 'autoComment', 'transcribe', 'asrModel',
         'commentPerRound', 'mentionName', 'dmMode', 'dmUid',
-        'keywords', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
+        'keywords', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'stateDir', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
         if (k in body) patch[k] = body[k]
       }
       // ⭐ 范围钳制 + 两份都写（config.json / DSH 原生设置页），统一走 persistCfg —— 见文件上方
@@ -2011,16 +2061,20 @@ export function apply(ctx, config) {
     if (req.method === 'POST' && path === '/api/bili-duty/open') {
       const body = await readBody(req)
       const dir = String(body?.what || 'out') === 'home' ? stateDir : outDir
-      if (process.platform !== 'win32') return sendJson(res, 200, { ok: false, error: '这个按钮目前只做了 Windows' })
-      // ⭐ 三种方式依次试（PATH 不全时 explorer.exe 会找不到 ✗；spawn 的失败是**异步**的，
-      //    try/catch 抓不到 ⇒ 必须挂 'error' 监听，否则会升级成未捕获异常）
-      // ⭐ 顺序很重要：把**最可能真的弹出窗口**的放第一（cmd start 走 shell 的 ShellExecute ✓）
+      // ⭐ 2026-10-25：三个平台都要能开（以前只有 Windows 实现，别的系统点一下只得到一句报错）。
+      // ⭐ spawn 的失败是**异步**的，try/catch 抓不到 ⇒ 必须挂 'error' 监听，
+      //    否则会升级成未捕获异常。
+      // ⭐ Windows 顺序很重要：把**最可能真的弹出窗口**的放第一（cmd start 走 shell 的 ShellExecute ✓），
       //    并且**不要再传 windowsHide**（2026-10-15 实测：传了以后"成功"但窗口不出现 ✗）
-      const attempts = [
-        ['cmd.exe', ['/c', 'start', '', dir]],
-        [join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe'), [dir]],
-        ['powershell.exe', ['-NoProfile', '-Command', "Start-Process -FilePath '" + dir.replace(/'/g, "''") + "'"]],
-      ]
+      const attempts = process.platform === 'win32'
+        ? [
+            ['cmd.exe', ['/c', 'start', '', dir]],
+            [join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe'), [dir]],
+            ['powershell.exe', ['-NoProfile', '-Command', "Start-Process -FilePath '" + dir.replace(/'/g, "''") + "'"]],
+          ]
+        : process.platform === 'darwin'
+          ? [['open', [dir]]]
+          : [['xdg-open', [dir]]]
       let lastErr = ''
       for (const [cmd, args] of attempts) {
         const err = await new Promise((resolve) => {

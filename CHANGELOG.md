@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.10
+
+### Fixed
+- **人设有了落点，不再被第一行身份声明压住**：`brief-prompt.txt` 开头改成先给 `{{OWNER_DOC}}`，
+  再说“先按上面那份设定进入身份”；删掉原第一行「你是我的 B站 + GitHub AIGC 情报员。」（它和
+  设定里的「你是亚托莉」直接冲突，且位置更靠前）；「## 今日结论」与 QQ 版开头加了
+  “必须用设定里那个身份的口吻写”的硬要求 + 写完自查
+- **超限告警说实话**：之前拿全天累计当“报告里有几条”（报告 5 条也说 10 条），
+  而且“已按上限关注前 N 条”是假的（插件从来没裁剪过内容）。现在分开报“本次报告 N 条”
+  与“今天累计 M 条”，并明说累计只增不减
+
+### Added
+- **状态目录可隔离**：新增 `stateDir`（默认空 = 旧路径 `bili-duty`，老用户零迁移），
+  同一台机器上桌面版与 web 版可各用各的家；`state.json` 写心跳 `host{pid,profile,at}`，
+  5 分钟内另一个宿主还在就跳过这一轮（避免互相覆盖报告、各推一份 QQ）
+
+### Changed
+- 非 Windows 也能“打开文件夹”（darwin `open` / linux `xdg-open`），不再只剩一句报错
+- `lib/uvfetch.mjs` 补上 Intel Mac 的 uv 包（`uv-x86_64-apple-darwin.tar.gz`）
+- `docs/INSTALL.md` 新增「两种宿主（web / 桌面）」与「同一台机上同时用」；
+  `docs/CONFIG.md` 补 `stateDir`
+
+### Tests
+- `scripts/prompt-smoke.mjs` 新增 E1～E4：旧身份声明不许回来、人设块必须在“进入身份”之前
+  （用 indexOf 比先后）、两处语气硬落点必须在
+- `scripts/audit-config.mjs` 新增 F1：index.js 不允许出现“只做了 Windows”这类半成品按钮字符串
+
 ## 0.1.9
 
 ### Changed

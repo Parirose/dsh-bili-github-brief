@@ -37,6 +37,7 @@
 | `overlayModel` | true | 把 GUI profile 的模型层镜像给 headless 那一轮。别动：关了就只能用 headless 默认模型。 |
 | `guiProfile` | desktop | GUI 用哪个 profile（找不到时会自动扫 `profiles/web` 等）。一般不用改。 |
 | `modelLayerFile` | 空 | 可选：直接指定一份含 `llm-pi-ai` / `agent-default-model` 的 patch 文件。正常不用填。 |
+| `stateDir` | 空 | 多宿主共存时填一个独立目录名（例 `bili-duty-web`）；留空 = 旧的 `bili-duty`。**只认单层目录名**，改完要重启 DSH。 |
 | `workspace` | 空 | 工作区路径；会读这里的 `AGENTS.md` 当作人设（日报模式也生效，仅影响语气 / 称呼）。 |
 | `reportLevel` | full | 报告详细程度：`full` / `brief` / `off`。 |
 

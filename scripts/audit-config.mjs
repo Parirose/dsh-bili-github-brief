@@ -81,6 +81,14 @@ for (const m of clientSrc.matchAll(/['"](\/api\/[\w\-/]+)['"]/g)) {
 const routes = new Set([...indexSrc.matchAll(/path\s*===\s*'([^']+)'/g)].map((m) => m[1]))
 for (const p of clientPaths) if (!routes.has(p)) warn(`client.js 调用了 ${p}，但 index.js 里没有对应路由`)
 
+/* ── F1) 不允许“只做了 Windows”这种半成品按钮 ──
+ * 起因：2026-10-25 之前，「打开文件夹」在非 Windows 上直接 return 一句
+ *   '这个按钮目前只做了 Windows'（后来补了 darwin/linux）。
+ * 这种字符串一出现，就说明又有一个按钮只对一个平台生效。 */
+for (const bad of ['只做了 Windows', '只支持 Windows', '仅 Windows 可用']) {
+  if (indexSrc.includes(bad)) warn(`index.js 里出现了\u201c${bad}\u201d—— 说明又有按钮只对一个平台生效（请补齐 darwin/linux）`)
+}
+
 /* ── 汇总 ── */
 console.log(`schema 键   : ${schemaKeys.length}`)
 console.log(`消费点覆盖 : ${schemaKeys.filter((k) => consumed.has(k)).length}/${schemaKeys.length}`)

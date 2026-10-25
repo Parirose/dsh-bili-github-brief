@@ -94,6 +94,30 @@ $env:ELECTRON_RUN_AS_NODE = '1'
 
 看到 `schemastery 取到了` 和 `dsh-tools：从宿主树取到` 才算完整。
 
+## 1.5 两种宿主（web / 桌面），以及同一台机上同时用
+
+| | web / 终端版 | 桌面版（DSH NEXT） |
+|---|---|---|
+| 装插件 | `dsh plugin --profile web add github:Parirose/dsh-bili-github-brief` | 同上（应用自带 `plugin-cli.js`） |
+| 初始化 headless 档 | `dsh headless list` | `"<app>/DSH NEXT.exe" "<app>/resources/app.asar/lib/plugin-cli.js" headless list` |
+| `dshBin` | 留空（走 PATH） | **建议显式填** `<app>/resources/app.asar/node_modules/@deepseek-ai/dsh/lib/bin.js` |
+| QQ 投递 | OneBot（`qqBackend: onebot`） | NapCat 插件或 OneBot |
+
+非 Windows 用户：NapCat 基本只有 Windows 版 ⇒ **投递请用 `qqBackend: onebot`**（自己跑一个
+OneBot v11 HTTP 实现）。
+
+同一台机器上同时用桌面版和 web 版：两个宿主默认都用 `$DSH_HOME/bili-duty/`，
+共用会互相覆盖报告、串味配额、各推一份 QQ。给其中一边（建议 web）在 `config.json` 里加：
+
+```json
+{ "stateDir": "bili-duty-web" }
+```
+
+- 只认**单层目录名**（不能带 `\` / `/`），改完重启 DSH；
+- 留空 / 不写 = 旧路径 `bili-duty`，老用户零迁移；
+- 两边心跳互相可见：5 分钟内另一个宿主还在跑，本轮会跳过；
+- **QQ 目标只在一端填**，否则两边都会发。
+
 ## 2. 装 B站依赖并登录
 
 重启 DSH 后：
