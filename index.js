@@ -1412,8 +1412,20 @@ export function apply(ctx, config) {
       try { stubReportIfMissing(1) } catch { /* 补不上也不影响这句话已经进日志 */ }
       return { started: false, why, error: msg }
     }
+    // ⭐ 2026-10-25：headless profile 不存在时，以前是子进程吐一句英文
+    //    `profile "xxx" not found`，落进 duty.log 像乱码 ⇒ 这里先自己查一下，给中文报错。
+    const profileName = String(cfg.headlessProfile || 'headless')
+    const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
+    const profileDir = join(dshHome, 'profiles', profileName)
+    if (!existsSync(profileDir)) {
+      const msg = '这一轮没跑：profile「' + profileName + '」不存在（应在 ' + profileDir
+        + '）。把设置里的「headless profile」改成已存在的档，或先用官方 CLI 建一个。'
+      log(msg)
+      try { stubReportIfMissing(1) } catch { /* 补不上也不影响这句话已进日志 */ }
+      return { started: false, why, error: msg }
+    }
     const overlay = ensureOverlay()
-    const args = [...dsh.args, '--profile', cfg.headlessProfile || 'headless']
+    const args = [...dsh.args, '--profile', profileName]
     if (overlay) args.push('--patch', overlay)
     args.push(promptFor())
     // ⭐ 这一轮的工作目录 = 使用者（或别的用户）的**工作区** —— 只有这样它的 `AGENTS.md` 才会自动加载。
