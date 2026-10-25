@@ -35,6 +35,7 @@ import { WINDOWS, stateDirOf, readJson, writeJson, ensureHomeFiles, ensureCharte
 import { loginStart, loginPoll, saveCredential, renderQrPng } from './lib/login.mjs'
 import { ensureUv } from './lib/uvfetch.mjs'
 import { extractModelBlocks } from './lib/model-layer.mjs'
+import { renderBriefPrompt } from './lib/prompt.mjs'
 
 export const name = 'bili-scroll'
 export const inject = ['webServer', 'tools', 'settings']
@@ -1147,32 +1148,24 @@ export function apply(ctx, config) {
       let brief = ''
       try { brief = readFileSync(join(stateDir, 'brief-prompt.txt'), 'utf8') } catch { /* use fallback below */ }
       const ghOn = cfg.githubEnabled !== false
-      const ghTokenSet = Boolean(String(cfg.githubToken || '').trim())
-      let text = brief
-      const fill = (k, v) => { text = text.split('{{' + k + '}}').join(String(v)) }
-      fill('DATE', dayKey())
-      fill('PER_DAY', quota)
-      fill('ALREADY', already)
-      fill('LEFT', left)
-      fill('KEYWORDS', kws.length ? kws.join('、') : '（用章程里的默认关键词）')
-      fill('GITHUB_STATUS', ghOn ? '开启' : '关闭')
-      fill('DISCOVER_STATUS', cfg.githubDiscover !== false ? '开启' : '关闭')
-      fill('WORKFLOW_STATUS', cfg.workflowScan !== false ? '开启' : '关闭')
-      fill('REPORT_PATH', join(outDir, `${dayKey()}.md`))
-      fill('QQ_PATH', join(outDir, `${dayKey()}.qq.md`))
-      // ⭐ 2026-10-25：日报分支也必须把使用者的 AGENTS.md 塞进提示词（以前只有非日报分支拼了 ownerDoc）
+      // ⭐ 2026-10-25：渲染这件事交给 lib/prompt.mjs 的纯函数（方便单测；
+      //    0.1.8 的“日报分支忘了拼 ownerDoc”就是因为它埋在这个大函数里、没人能单独渲染一遍）。
+      //    ownerBlock 的构造（含“没拿到设定”的中性提示）留在这里。
       const ownerBlock = ownerDoc || '（这一轮没有拿到使用者的设定：工作区没填，或那个目录里没有 AGENTS.md ⇒ 按中性说话，别扮演任何人、也别自己编一套。）'
-      // ⚠️ 空模板的兜底要先判（否则下面一追加 ownerBlock，text 就不空了，兜底永远进不去）
-      if (!text.trim()) {
-        text = `你是我的 B站 + GitHub AIGC 情报员。按下面的规则生成 B站 + GitHub 日报。关键词：${kws.join('、')}。报告写到 ${join(outDir, `${dayKey()}.md`)}，QQ 版写到 ${join(outDir, `${dayKey()}.qq.md`)}。不要发 B站评论或私信。`
-          + '\n\n' + ownerBlock
-          + '\n\n⭐ 上面那份设定只影响语气和称呼；不编造、不发 B站评论或私信、报告路径这些规则优先。'
-        return text
-      }
-      fill('OWNER_DOC', ownerBlock)
-      // ⚠️ 用户把家里那份模板改成了旧版（没有 {{OWNER_DOC}} 占位）时，人设不能又丢 ⇒ 直接追加到末尾
-      if (!brief.includes('{{OWNER_DOC}}')) text = text.replace(/\s*$/, '') + '\n\n' + ownerBlock + '\n'
-      return text
+      return renderBriefPrompt({
+        template: brief,
+        ownerBlock,
+        date: dayKey(),
+        keywords: kws,
+        perDay: quota,
+        already,
+        left,
+        githubOn: ghOn,
+        discoverOn: cfg.githubDiscover !== false,
+        workflowOn: cfg.workflowScan !== false,
+        reportPath: join(outDir, `${dayKey()}.md`),
+        qqPath: join(outDir, `${dayKey()}.qq.md`),
+      })
     }
     return `你是这个账号的 B站 助手。`
       + `下面是使用者的设定（如果有）—— **按它来**，别用你默认那套人格。`
