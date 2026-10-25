@@ -51,7 +51,24 @@ macOS/Linux 换成 `<App>/Contents/Resources/app.asar/lib/plugin-cli.js`、`.../
 & '<app>/DSH NEXT.exe' '<app>/resources/app.asar/lib/plugin-cli.js' headless list
 ```
 
-而 headless 那一轮也要能拿到模型：供应商/默认模型写到 **home 层 patch**（`$DSH_HOME/cordis.patch.yml`），才会同时作用于 desktop 和 headless。
+而 headless 那一轮也要能拿到模型。模型层要写在 **profile 自己的 patch** 里：
+
+- `$DSH_HOME/profiles/desktop/cordis.patch.yml` —— 桌面版设置页「模型」写的就是这里；
+- `$DSH_HOME/profiles/headless/cordis.patch.yml` —— 日报那一轮用它。
+
+插件（v0.1.4 起）每次跑前会把 GUI profile 那一份里的 `llm-pi-ai` / `agent-default-model`
+抄进 headless 的临时 overlay，所以**平时只需要管 GUI 那一份**。找不到 `desktop` 时会自动扫描
+`profiles/web` 等其它 profile；也可以用 `guiProfile` / `modelLayerFile` 显式指定。
+
+> ⚠️ **不要写进 home 层 patch（`$DSH_HOME/cordis.patch.yml`）**。
+> home 层优先级高于 profile 层，写了之后 DSH 设置页的模型设置**永久无法保存**，报：
+> `Configuration for "llm-pi-ai" is overridden by a home patch or command-line overlay`
+
+已经写在 home 层的老用户，运行一次自动迁移（会留 `.bak-<时间戳>` 备份）：
+
+```powershell
+node scripts/migrate-model-layer.mjs
+```
 
 ### 宿主依赖自检
 

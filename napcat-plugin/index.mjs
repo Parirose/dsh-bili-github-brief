@@ -121,8 +121,19 @@ async function forwardToQQ(body) {
   if (event === "brief_ready" && !config.forwardBriefs) return { ok: true, skipped: "briefs-off" };
   if (event !== "comment_sent" && event !== "dm_sent" && event !== "brief_ready") return { ok: false, error: "未知事件: " + event };
 
-  const groups = parseIds(config.groupIds);
-  const privates = parseIds(config.privateIds);
+  let groups = parseIds(config.groupIds);
+  let privates = parseIds(config.privateIds);
+  // ⭐ DSH 插件已经把目标随请求带来时，以它为准 —— QQ 群号 / QQ 号只在插件设置里填一处。
+  //    没带 targets 的旧请求才回退到本插件自己的配置。
+  if (Array.isArray(body.targets) && body.targets.length) {
+    const pick = (kind) => [...new Set(body.targets
+      .filter((t) => t && t.kind === kind)
+      .map((t) => String(t.id || "").trim())
+      .filter(Boolean))];
+    const g = pick("group");
+    const p = pick("private");
+    if (g.length || p.length) { groups = g; privates = p; }
+  }
   if (!groups.length && !privates.length) return { ok: false, error: "没有配置 QQ 群或 QQ 号" };
 
   const key = dedupeKey(body);
@@ -164,7 +175,11 @@ async function forwardToQQ(body) {
     await sendTo("private", id);
     await new Promise(r => setTimeout(r, 300));
   }
-  if (ctx) ctx.logger.info("[dsh-bili-forward] " + kindOf(event) + " 已转发 " + sent + " 条消息，失败 " + failed.length);
+  const targetDesc = [
+    ...groups.map((id) => "group:" + id),
+    ...privates.map((id) => "private:" + id),
+  ].join(", ");
+  if (ctx) ctx.logger.info("[dsh-bili-forward] " + kindOf(event) + " 已转发 " + sent + " 条消息 → " + targetDesc + "，失败 " + failed.length);
   return { ok: failed.length === 0, sent, failed, messages };
 }
 

@@ -14,10 +14,12 @@ B站数据采集 MCP 服务，支持 OpenClaw / Claude Code / Cursor / Cline
 #      ③ 登录成功后凭证**原子写**（先写 .tmp 再 os.replace）
 #      ④ `bili_comments` 把抓取异常带进返回（风控 -412 不再伪装成"这条视频 0 条评论"）
 #      ⑤ `bili_reply` 回执带上 `rpid` / `rpid_str` / `root` / `parent`（判重表与评论复核要用）
+#      ⑥ `bili_subtitle` 把 TLS 信任失败单独包成 `tls_untrusted_ca`；`bili_video_info` 用 `get_tags()` 补标签
 import asyncio
 import json
 import base64
 import os
+import ssl
 import sys
 import tempfile
 import urllib.request
@@ -98,6 +100,13 @@ def get_cred() -> Credential:
 
 QQ_WEBHOOK = os.environ.get("BILI_DUTY_QQ_WEBHOOK", "").strip()
 QQ_TOKEN = os.environ.get("BILI_DUTY_QQ_TOKEN", "").strip()
+# 目标只在 DSH 插件设置里填一次；这里原样带给 NapCat 插件。
+try:
+    QQ_TARGETS = json.loads(os.environ.get("BILI_DUTY_QQ_TARGETS", "[]") or "[]")
+    if not isinstance(QQ_TARGETS, list):
+        QQ_TARGETS = []
+except Exception:
+    QQ_TARGETS = []
 
 
 def _notify_qq(event: dict) -> None:
@@ -108,6 +117,7 @@ def _notify_qq(event: dict) -> None:
         payload = {
             "source": "dsh-bili-scroll",
             "time": datetime.now(timezone.utc).isoformat(),
+            "targets": QQ_TARGETS,
             **event,
         }
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -422,17 +432,20 @@ async def bili_comments(bvid: str, num: int = 30) -> str:
 
 # ========== Tool 3: 获取字幕 ==========
 
-@tool()
-async def bili_subtitle(bvid: str) -> str:
-    """
-    获取B站视频的AI字幕（语音转文字）
+def _is_tls_error(e: Exception) -> bool:
+    """aisubtitle.hdslb.com 的中间 CA 不在 certifi 里时，aiohttp / ssl 的报错形状不同。"""
+    if isinstance(e, ssl.SSLError):
+        return True
+    name = type(e).__name__
+    text = str(e)
+    return (
+        name in ("ClientConnectorCertificateError", "ClientConnectorSSLError")
+        or "CERTIFICATE_VERIFY_FAILED" in text
+        or "unable to get local issuer certificate" in text
+    )
 
-    Args:
-        bvid: 视频BV号，如"BV1uNk1YxEJQ"
-    
-    Returns:
-        视频的完整字幕文本
-    """
+
+async def _bili_subtitle_impl(bvid: str) -> str:
     cred = get_cred()
     v = video.Video(bvid=bvid, credential=cred)
 
@@ -481,6 +494,29 @@ async def bili_subtitle(bvid: str) -> str:
     }, ensure_ascii=False)
 
 
+@tool()
+async def bili_subtitle(bvid: str) -> str:
+    """
+    获取B站视频的AI字幕（语音转文字）
+
+    Args:
+        bvid: 视频BV号，如"BV1uNk1YxEJQ"
+
+    Returns:
+        视频的完整字幕文本
+    """
+    try:
+        return await _bili_subtitle_impl(bvid)
+    except Exception as e:
+        if _is_tls_error(e):
+            return json.dumps({
+                "bvid": bvid,
+                "error": "tls_untrusted_ca",
+                "hint": "根证书缺失：在插件家目录运行 .venv/Scripts/pip install pip-system-certs，然后重启 DSH",
+            }, ensure_ascii=False)
+        raise
+
+
 # ========== Tool 4: 获取弹幕 ==========
 
 @tool()
@@ -526,6 +562,14 @@ async def bili_video_info(bvid: str) -> str:
     v = video.Video(bvid=bvid, credential=cred)
     info = await v.get_info()
     stat = info.get("stat", {})
+    # `/x/web-interface/view` 没有 tag 字段；不补就永远是 []。
+    tags = [t.get("tag_name") for t in (info.get("tag") or []) if isinstance(t, dict) and t.get("tag_name")]
+    if not tags:
+        try:
+            tags = [t.get("tag_name") for t in (await v.get_tags()) if isinstance(t, dict) and t.get("tag_name")]
+        except Exception:
+            tags = [info.get("tname")] if info.get("tname") else []
+    tags = list(dict.fromkeys([t for t in tags if t]))
 
     return json.dumps({
         "bvid": info.get("bvid"),
@@ -537,7 +581,7 @@ async def bili_video_info(bvid: str) -> str:
         "pubdate": info.get("pubdate", 0),
         "ctime": info.get("ctime", 0),
         "pages": len(info.get("pages", [])),
-        "tags": [t.get("tag_name") for t in info.get("tag", []) if t.get("tag_name")],
+        "tags": tags,
         "stat": {
             "view": stat.get("view", 0),
             "danmaku": stat.get("danmaku", 0),

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.4
+
+### Breaking
+- `llm-pi-ai` / `agent-default-model` 不再由插件写入或写回；模型层只放在 profile patch。插件会把 GUI profile 的模型层镜像给 headless 临时 overlay（P0）
+- `qqBackend` 新增 `off` 并成为新默认；QQ 群号 / QQ 号改在 DSH 插件设置里填一次，NapCat 插件通过请求里的 `targets` 接收（P1）
+- `perDay` 在 brief 模式里成为真正的硬上限，提示词会收到 `PER_DAY` / `ALREADY` / `LEFT`（P1）
+
+### Fixed
+- 新增 `overlayModel` / `guiProfile` / `modelLayerFile`；自动扫描 `profiles/web` 等 GUI profile，不再假设只有 `desktop`
+- 新增 `scripts/migrate-model-layer.mjs`：从 home patch 迁移模型层到 desktop/headless profile，保留 home 里其它配置并留备份
+- `scripts/verify-host.mjs` 增加 home patch 模型层体检
+- QQ 投递开启后强制关闭 B站私信，`bili_send_message` 不再出现在那一轮的工具白名单里
+- `splitBriefParts()` 超过 8 段时明确写日志，不再静默丢尾
+- `bili_video_info` 用 `get_tags()` 补标签，不再恒为空
+- Windows 依赖增加 `pip-system-certs`；字幕 TLS 失败返回 `tls_untrusted_ca` 和修复提示
+- uv 下载超时改为 180 秒，并区分「超时换源」和普通失败
+
 ## 0.1.3
 
 ### Fixed

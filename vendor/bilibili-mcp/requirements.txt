@@ -6,3 +6,5 @@ aiohttp>=3.9.0
 mcp>=1.0.0,<2
 # 插件用 Python 画登录二维码；不装就只能退回"只给 URL"
 qrcode[pil]>=8.0
+# Windows 下让 Python/OpenSSL 使用系统根证书（aisubtitle.hdslb.com 的中间 CA 不在 certifi 里）
+pip-system-certs>=5.3; sys_platform == "win32"

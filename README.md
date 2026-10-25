@@ -26,8 +26,8 @@ English: A DSH + NapCat plugin that builds a daily AIGC brief from Bilibili and 
 3. 安装完必须提醒用户重启一次 DSH。bundle 层要重启才组装，不重启插件不会生效。
 4. 重启后让用户进入「设置 → 刷B站」：先点「装主依赖」，再点「扫码登录」，用手机 B站扫码，确认时选「记住我 / 长期」。
 5. 让用户自己填 GitHub Token。推荐 fine-grained token，Repository access 选 Public repositories；公开仓库默认只读，不需要额外 Contents 权限。不要把 token 写进 README、日志或聊天。
-6. 安装 NapCat 插件：把本仓库的 `napcat-plugin/` 目录复制到 NapCat 的 `plugins/napcat-plugin-dsh-bili-forward/`，修改 `config.json` 里的群号、私聊 QQ、token。通常只需要重启 NapCat，不需要重启 QQ；如果用户的 NapCat 版本要求重启 QQ，先停下来询问用户。
-7. 让用户在 DSH 设置页填 QQ 转发地址和 token，先点「现在跑一轮」测试。确认本地报告和 QQ 分段都正常后，再打开每日定时。
+6. 安装 NapCat 插件：把本仓库的 `napcat-plugin/` 目录复制到 NapCat 的 `plugins/napcat-plugin-dsh-bili-forward/`，只填 token / `forwardBriefs`；群号和私聊 QQ 留空。通常只需要重启 NapCat，不需要重启 QQ；如果用户的 NapCat 版本要求重启 QQ，先停下来询问用户。
+7. 让用户在 DSH 设置页选「QQ 投递渠道」、填群号 / QQ 号 / 转发地址 / token，先点「现在跑一轮」测试。确认本地报告和 QQ 分段都正常后，再打开每日定时。
 8. 不要替用户打开「自动评论并 @ 你」，也不要发 B站评论或私信。本项目只读 B站，不写 B站。
 
 ## 功能
@@ -38,8 +38,8 @@ English: A DSH + NapCat plugin that builds a daily AIGC brief from Bilibili and 
 - 新模型雷达：candidate / watch / confirmed
 - 本地完整 Markdown 报告
 - QQ 版按长度动态分段，每条 B站/GitHub 内容带纯 URL
-- NapCat 多群、多私聊、多段投递
-- QQ 投递支持 NapCat 插件或 OneBot v11 HTTP 直传
+- NapCat 多群、多私聊、多段投递；目标只在 DSH 插件设置填一次
+- QQ 投递支持 NapCat 插件或 OneBot v11 HTTP 直传，`off` 可彻底关闭
 - 每日定时开关，默认 09:00，默认关闭
 
 ## 仓库结构
@@ -59,7 +59,7 @@ dsh-bili-github-brief/
 ├─ napcat-plugin/           NapCat 插件（不含 NapCat 本体）
 ├─ examples/                示例配置与合成报告
 ├─ docs/                    安装、配置、架构、排障
-└─ scripts/check-secrets.ps1
+└─ scripts/                 自检、秘密扫描、模型层迁移
 ```
 
 ## 安装 DSH 插件
@@ -75,6 +75,24 @@ dsh plugin --profile web add link:D:\path\to\dsh-bili-github-brief
 ```
 
 安装后重启 DSH。
+
+### 模型配置
+
+模型由用户在 DSH 设置页自己选，插件不写死供应商。模型层只放在 **profile 的 patch** 里：
+
+```text
+$DSH_HOME/profiles/desktop/cordis.patch.yml
+$DSH_HOME/profiles/web/cordis.patch.yml
+```
+
+插件每次跑日报前会把 GUI profile 的 `llm-pi-ai` / `agent-default-model` 镜像到 headless 临时
+overlay，不会写回 profile/home。**不要写 `$DSH_HOME/cordis.patch.yml`**：home 层会压住设置页，
+报 `is overridden by a home patch or command-line overlay`。老用户用下面的脚本迁移：
+
+```powershell
+node scripts/migrate-model-layer.mjs
+node scripts/verify-host.mjs
+```
 
 > 本项目的 DSH 内部插件 id 仍为 `bili-scroll`，方便从现有 `dsh-bili-scroll` 配置迁移。不要和上游 `dsh-bili-scroll` 同时安装。
 
@@ -102,17 +120,18 @@ napcat-plugin/
 
 ```json
 {
-  "groupIds": "123456789",
-  "privateIds": "10001,10002",
+  "groupIds": "",
+  "privateIds": "",
   "token": "change-me",
   "forwardBriefs": true
 }
 ```
 
-- `groupIds`：多个群用英文逗号分隔
-- `privateIds`：多个 QQ 用英文逗号分隔
+- `groupIds` / `privateIds`：正常留空；DSH 会在请求里带 `targets`，群号 / QQ 号只填在 DSH 插件设置
 - `token`：和 DSH 里的 `qqForwardToken` 一致
 - `forwardBriefs`：必须为 true
+
+> 旧版 DSH 插件不带 `targets` 时，NapCat 插件才回退读这里的 `groupIds` / `privateIds`。
 
 改完重启 NapCat。通常不需要重启 QQ；如果实际环境要求重启 QQ，先询问用户。
 
@@ -135,11 +154,15 @@ Token 只保存在本地，不进入报告、QQ 消息或日志。
 在 DSH 设置页填：
 
 ```text
-QQ 转发地址：http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward
-QQ 转发 Token：和 NapCat 插件里的 token 一致
+QQ 投递渠道：本机 NapCat 插件（或 OneBot v11 HTTP）
+QQ 群号：123456789,987654321
+QQ 号：10001,10002
+转发地址：http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward
+校验口令：和 NapCat 插件里的 token 一致
 ```
 
-如果 NapCat 的 WebUI 端口不是 6099，改成实际端口。
+群号 / QQ 号只在 DSH 插件设置里填一次；NapCat 插件页留空即可。QQ 投递开启后，B站私信会
+自动关闭，避免同一条内容发两遍。如果 NapCat 的 WebUI 端口不是 6099，改成实际端口。
 
 ## 定时
 

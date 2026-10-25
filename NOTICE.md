@@ -23,6 +23,8 @@
 - 增加每日定时与设置页字段
 - 增加 QQ 版纯 URL 输出与动态分段
 - 更新检查与一键升级指向本项目，不再指向上游
+- 模型层改为从 GUI profile 镜像到 headless overlay；QQ 投递目标收进插件设置
+- `perDay` 在 brief 模式中成为硬上限；字幕 TLS 错误与视频标签补齐
 
 ### adoresever/bilibili-mcp
 
@@ -31,6 +33,8 @@
 - 原始版权：Copyright (c) 2026 AGI_Ananas（见 `vendor/bilibili-mcp/LICENSE`）
 - 使用方式：`vendor/bilibili-mcp/` 中的 B站 MCP 工具来自该上游，并做了本地修改。
 - 原始许可证保留在 `vendor/bilibili-mcp/LICENSE`。
+- 本地修改：工具白名单、凭证原子写、评论抓取错误透传、`bili_subtitle` TLS 错误分类、
+  `bili_video_info` 标签补齐、QQ 目标透传。
 
 ## 依赖与兼容
 

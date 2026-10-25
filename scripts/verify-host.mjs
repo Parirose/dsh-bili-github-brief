@@ -9,6 +9,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import os from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -23,7 +24,7 @@ console.log(`plugin root : ${root}`)
 console.log(`runner      : ${isElectron ? `electron ${process.versions.electron}` : `node ${process.version}`}`)
 console.log('')
 
-console.log('[1/4] bundle 挂载声明')
+console.log('[1/5] bundle 挂载声明')
 let pkgName = ''
 try {
   pkgName = String(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).name || '')
@@ -48,7 +49,7 @@ for (const name of declaredNames) {
   else bad(`name: ${name} != 包名 ${pkgName} —— 加载时会 ERR_MODULE_NOT_FOUND，整条插件不激活`)
 }
 
-console.log('[2/4] client 注册 id')
+console.log('[2/5] client 注册 id')
 try {
   const src = readFileSync(join(root, 'client.js'), 'utf8')
   const m = /window\.__ModuleLoader__\.load\(\{\s*id:\s*['"]([^'"]+)['"]/.exec(src)
@@ -59,7 +60,7 @@ try {
   } else warn('client.js 里没找到 window.__ModuleLoader__.load({ id: ... })')
 } catch (e) { bad(`读不到 client.js：${e?.message ?? e}`) }
 
-console.log('[3/4] 命名空间（id <-> export const name）')
+console.log('[3/5] 命名空间（id <-> export const name）')
 let modName = ''
 try {
   const src = readFileSync(join(root, 'index.js'), 'utf8')
@@ -74,7 +75,7 @@ for (const id of declaredIds) {
   else bad(`id: ${id} != export const name ${modName} —— 设置页会缺`)
 }
 
-console.log('[4/4] 宿主依赖')
+console.log('[4/5] 宿主依赖')
 try {
   const { candidateRoots, loadHostDeps } = await import(pathToFileURL(join(root, 'lib', 'hostdeps.mjs')).href)
   const roots = candidateRoots()
@@ -91,6 +92,21 @@ try {
     else warn('dsh-tools 未从宿主树取到，已退到本地等价实现')
   }
 } catch (e) { bad(`hostdeps 自检异常：${e?.message ?? e}`) }
+
+console.log('[5/5] 模型层位置')
+const dshHome = process.env.DSH_HOME || join(os.homedir(), '.dsh')
+const homePatch = join(dshHome, 'cordis.patch.yml')
+try {
+  const t = readFileSync(homePatch, 'utf8').replace(/^\uFEFF/, '')
+  if (/^\s*-\s*id:\s*(llm-pi-ai|agent-default-model)\b/m.test(t)) {
+    bad('home patch 里写了模型层 ⇒ 设置页改模型会被拒。跑 node scripts/migrate-model-layer.mjs')
+  } else {
+    ok('home patch 没有模型层（设置页可正常改模型）')
+  }
+} catch (e) {
+  if (e?.code === 'ENOENT') ok('home patch 不存在（正常）')
+  else warn(`读 home patch 失败：${e?.message ?? e}`)
+}
 
 console.log('')
 if (fails.length) {

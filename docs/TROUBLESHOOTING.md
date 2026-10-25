@@ -18,12 +18,46 @@
 - 该视频可能没有 AI 字幕
 - 开启「本地转写」并安装转写依赖
 - 转写失败时报告会写「因无字幕跳过 N 条」
+- 如果错误是 `tls_untrusted_ca` / `CERTIFICATE_VERIFY_FAILED`：这是 `aisubtitle.hdslb.com`
+  的中间 CA 不在 Python 的 `certifi` 里，不是反爬。重装主依赖（v0.1.4 的 requirements 已带
+  `pip-system-certs`），或手动补：
+
+```powershell
+<家>\.venv\Scripts\pip install pip-system-certs
+```
+
+装完重启 DSH，让 MCP 子进程重新启动。
+
+## 设置页报 "is overridden by a home patch or command-line overlay"
+
+完整报错类似：
+
+```text
+Configuration for "llm-pi-ai" is overridden by a home patch or command-line overlay
+```
+
+原因：`$DSH_HOME/cordis.patch.yml` 里写了 `llm-pi-ai` / `agent-default-model`。home 层优先级高于
+profile 层，所以设置页写进 profile 的值永远会被 home 层压住，DSH 就拒绝保存。
+
+修法：
+
+1. 把 home patch 里的这两块删掉，模型配置只放在 `profiles/<GUI profile>/cordis.patch.yml`。
+2. 老用户可以直接跑自动迁移（会留 `.bak-<时间戳>` 备份，home 里其它配置会保留）：
+
+```powershell
+node scripts/migrate-model-layer.mjs
+```
+
+3. 再跑 `node scripts/verify-host.mjs`，确认「home patch 没有模型层」。
+
+插件从 v0.1.4 起只把 profile 里的模型层镜像给 headless 临时 overlay，不会写回任何 profile/home。
 
 ## QQ 没收到
 
-- 确认 NapCat 插件已加载
-- 访问 `/plugin/napcat-plugin-dsh-bili-forward/api/health`
-- 确认 `groupIds` / `privateIds` 已填
+- 确认 DSH 设置页的「QQ 投递渠道」不是「不发 QQ」
+- 确认 `qqGroupIds` / `qqPrivateIds` 填在 **DSH 插件设置**里；NapCat 插件页的
+  `groupIds` / `privateIds` 可以留空（旧版没带 `targets` 时才需要在那也填）
+- 确认 NapCat 插件已加载，访问 `/plugin/napcat-plugin-dsh-bili-forward/api/health`
 - 确认 DSH 和 NapCat 的 token 一致
 - 确认 NapCat WebUI 端口和 DSH 里的 `qqForwardUrl` 一致
 - 改完 NapCat 配置后重启 NapCat
@@ -105,8 +139,8 @@ install.log: 正在下载 uv —— GitHub 直连
 
 原因：
 
-- uv 下载没有超时；网络到 GitHub release 很慢时会一直挂着
-- `installing` 是进程内内存标志，下载卡死后不会自己复位
+- v0.1.3 起 uv 下载有超时；v0.1.4 起超时为 180 秒，超时会换源
+- `installing` 是进程内内存标志，旧版本下载卡死后不会自己复位
 
 处理：
 
@@ -138,6 +172,7 @@ uv pip install --python <家>\.venv\Scripts\python.exe `
 ```text
 <家>\.venv\Scripts\python.exe 存在
 site-packages 里有 bilibili_api / mcp / qrcode
+Windows 还要有 pip_system_certs（字幕 TLS 根证书修复）
 ```
 
 4. 装完后把 `pythonPath` 指到：

@@ -154,6 +154,11 @@ window.__ModuleLoader__.load({
       const [replyPer, setReplyPer] = React.useState(null)
       const [dmUid, setDmUid] = React.useState(null)        // 私信收件人 UID（本地草稿）
       const [dmMode, setDmMode] = React.useState(null)      // 投递方式：off / only / both
+      const [qqBackend, setQqBackend] = React.useState(null) // off / napcat-plugin / onebot
+      const [qqGroups, setQqGroups] = React.useState(null)
+      const [qqPrivates, setQqPrivates] = React.useState(null)
+      const [qqUrl, setQqUrl] = React.useState(null)
+      const [qqToken, setQqToken] = React.useState(null)     // 只用于新输入；不回显已有口令
       const [ghToken, setGhToken] = React.useState(null)
       const [schedTime, setSchedTime] = React.useState(null)
       const [mention, setMention] = React.useState(null)
@@ -182,6 +187,11 @@ window.__ModuleLoader__.load({
         if (cfg && mention === null) setMention(cfg.mentionName || '')
         if (cfg && dmUid === null) setDmUid(cfg.dmUid ? String(cfg.dmUid) : '')
         if (cfg && dmMode === null) setDmMode(cfg.dmMode || 'off')
+        if (cfg && qqBackend === null) setQqBackend(cfg.qqBackend || 'off')
+        if (cfg && qqGroups === null) setQqGroups(cfg.qqGroupIds || '')
+        if (cfg && qqPrivates === null) setQqPrivates(cfg.qqPrivateIds || '')
+        if (cfg && qqUrl === null) setQqUrl(cfg.qqForwardUrl || '')
+        if (cfg && qqToken === null) setQqToken('')
         if (cfg && ghToken === null) setGhToken('')
         if (cfg && schedTime === null) setSchedTime(cfg.scheduleTime || '09:00')
       }, [cfg])
@@ -530,6 +540,51 @@ window.__ModuleLoader__.load({
               onBlur: () => { const v = String(mention || '').trim(); setMention(v); patch({ mentionName: v }, '要 @ 谁') },
             }),
             h('div', { 'data-bd-note': '' }, '留空的话它就不发评论了 —— 因为评论存在的意义就是 @ 那一下')) : null,
+          h('div', { 'data-bd-label': '' }, 'QQ 投递渠道'),
+          h('select', {
+            'data-bd-input': '', value: qqBackend ?? 'off',
+            onChange: (e) => { setQqBackend(e.target.value); patch({ qqBackend: e.target.value }, 'QQ 投递渠道') },
+          },
+            h('option', { value: 'off' }, '不发 QQ（只写本地报告）'),
+            h('option', { value: 'napcat-plugin' }, '本机 NapCat 插件（推荐）'),
+            h('option', { value: 'onebot' }, 'OneBot v11 HTTP 直连')),
+          (qqBackend && qqBackend !== 'off') ? h('div', { 'data-bd-sub': '' },
+            h('div', { 'data-bd-row': '' },
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, 'QQ 群号'),
+                h('input', {
+                  'data-bd-input': '', value: qqGroups ?? '',
+                  placeholder: '多个群用逗号分隔，例 123456789',
+                  onChange: (e) => setQqGroups(e.target.value),
+                  onBlur: () => { const v = String(qqGroups || '').trim(); setQqGroups(v); patch({ qqGroupIds: v }, 'QQ 群号') },
+                })),
+              h('div', { 'data-bd-grow': '' },
+                h('div', { 'data-bd-label': '' }, 'QQ 号（私聊）'),
+                h('input', {
+                  'data-bd-input': '', value: qqPrivates ?? '',
+                  placeholder: '多个 QQ 用逗号分隔，例 10001',
+                  onChange: (e) => setQqPrivates(e.target.value),
+                  onBlur: () => { const v = String(qqPrivates || '').trim(); setQqPrivates(v); patch({ qqPrivateIds: v }, 'QQ 号') },
+                }))),
+            h('div', { 'data-bd-note': '' }, '群号 / QQ 号只在这里填一次；NapCat 插件页留空即可。'),
+            h('div', { 'data-bd-label': '' }, qqBackend === 'onebot' ? 'OneBot HTTP 地址' : 'NapCat 插件转发地址'),
+            h('input', {
+              'data-bd-input': '', value: qqUrl ?? '',
+              placeholder: qqBackend === 'onebot' ? 'http://127.0.0.1:3000' : 'http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward',
+              onChange: (e) => setQqUrl(e.target.value),
+              onBlur: () => { const v = String(qqUrl || '').trim(); setQqUrl(v); patch({ qqForwardUrl: v }, '转发地址') },
+            }),
+            h('div', { 'data-bd-label': '' }, '校验口令（可空）'),
+            h('input', {
+              'data-bd-input': '', type: 'password', value: qqToken ?? '',
+              placeholder: cfg && cfg.qqForwardTokenSet ? '已设置；留空 = 不改' : '和 NapCat / OneBot 一致即可',
+              onChange: (e) => setQqToken(e.target.value),
+              onBlur: () => { const v = String(qqToken || ''); if (v.trim()) { setQqToken(''); patch({ qqForwardToken: v }, '校验口令') } },
+            }),
+            h('div', { 'data-bd-note': '' }, 'QQ 已接手时，B站私信会自动关闭，避免同一条内容两边都发。')) : null,
+          (qqBackend && qqBackend !== 'off')
+            ? h('div', { 'data-bd-note': '' }, 'B站私信现在由 QQ 代替；下面的投递方式设置会被忽略。')
+            : h('div', null,
           h('div', { 'data-bd-label': '' }, '投递方式（评论 还是 私信）'),
           h('select', {
             'data-bd-input': '', value: dmMode ?? 'off',
@@ -547,7 +602,7 @@ window.__ModuleLoader__.load({
               onBlur: () => { const n = Math.max(0, Number(dmUid) || 0); setDmUid(n ? String(n) : ''); patch({ dmUid: n }, '私信收件人') },
             }),
             h('div', { 'data-bd-note': '' }, '私信内容 = 本轮每条的「标题 + 链接 + 一句话」，一轮合并成一条发（不受 150 字限制）'),
-            h('div', { 'data-bd-note': '' }, '⚠️ 建议先让这个号和收件人互关：B站 对「陌生人私信」会限流，还可能不弹提醒')) : null,
+            h('div', { 'data-bd-note': '' }, '⚠️ 建议先让这个号和收件人互关：B站 对「陌生人私信」会限流，还可能不弹提醒')) : null),
           h(ToggleRow, {
             label: '本地转写没字幕的视频',
             note: '默认关；开了以后，没字幕的视频会在本机转写一遍（不花 API 钱）',

@@ -27,12 +27,14 @@ import { createHash } from 'node:crypto'
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { McpClient } from './lib/mcp.mjs'
 import { verifyRecent, appendVerifyToReport } from './lib/verify.mjs'
 import { WINDOWS, stateDirOf, readJson, writeJson, ensureHomeFiles, ensureCharter, charterPath, inWindow, dayKey } from './lib/state.mjs'
 import { loginStart, loginPoll, saveCredential, renderQrPng } from './lib/login.mjs'
 import { ensureUv } from './lib/uvfetch.mjs'
+import { extractModelBlocks } from './lib/model-layer.mjs'
 
 export const name = 'bili-scroll'
 export const inject = ['webServer', 'tools', 'settings']
@@ -63,11 +65,11 @@ export const Config = !z ? undefined : z.object({
   qqForwardUrl: z.string().default('').extra('volatile', true),
   /** ⭐ QQ 转发口令（可选，和 NapCat 插件里填的一致） */
   qqForwardToken: z.string().default('').extra('volatile', true),
-  /** QQ 投递后端：napcat-plugin = NapCat 插件 webhook；onebot = 直接调 OneBot v11 HTTP */
-  qqBackend: z.string().default('napcat-plugin').extra('volatile', true),
-  /** OneBot 群号，英文逗号分隔；qqBackend=onebot 时使用 */
+  /** QQ 投递后端：off = 不投递；napcat-plugin = NapCat 插件 webhook；onebot = 直接调 OneBot v11 HTTP */
+  qqBackend: z.string().default('off').extra('volatile', true),
+  /** QQ 群号，英文逗号分隔；NapCat 插件与 OneBot 两种后端共用，只填这一处 */
   qqGroupIds: z.string().default('').extra('volatile', true),
-  /** OneBot 私聊 QQ，英文逗号分隔；qqBackend=onebot 时使用 */
+  /** QQ 私聊 QQ 号，英文逗号分隔；NapCat 插件与 OneBot 两种后端共用，只填这一处 */
   qqPrivateIds: z.string().default('').extra('volatile', true),
   briefMode: z.boolean().default(true).extra('volatile', true),
   githubEnabled: z.boolean().default(true).extra('volatile', true),
@@ -96,6 +98,12 @@ export const Config = !z ? undefined : z.object({
   headlessProfile: z.string().default('headless').extra('volatile', true),
   /** 给那一轮叠一份插件自己的 patch（把 B站 MCP 挂上）—— 用户 profile 一个字都不用改 */
   overlayMcp: z.boolean().default(true).extra('volatile', true),
+  /** 把桌面档正在用的模型 / 供应商镜像给日报那一轮；不写回任何 profile/home */
+  overlayModel: z.boolean().default(true).extra('volatile', true),
+  /** GUI 用哪个 profile（一般不用改；找不到时自动扫描其它 profile） */
+  guiProfile: z.string().default('desktop').extra('volatile', true),
+  /** 可选：直接指定一份含 llm-pi-ai / agent-default-model 的 patch 文件 */
+  modelLayerFile: z.string().default('').extra('volatile', true),
   /** 跑 headless 时的工作目录 */
   workspace: z.string().default('').extra('volatile', true),
   /** 日报形态：full=完整（现状）· brief=每条一两行 · off=不写报告（只发评论） */
@@ -164,7 +172,8 @@ export function apply(ctx, config) {
   // ⚠️ 2026-10-18 用户实测：徽章显示「环境已就绪」、B站也登录了，可一跑就 `ModuleNotFoundError: No module named 'mcp'`
   //    ⇒ 原判据**只查了 bilibili_api**（0.1.2 修"假就绪"时留下的口子）⇒ 缺 `mcp` / `qrcode` 也照样说就绪 ✗
   //    ⇒ 三个都得有：bilibili_api（查数据）· mcp（跑那一轮的 MCP 服务器）· qrcode（画登录二维码）
-  const VENV_DEPS = ['bilibili_api', 'mcp', 'qrcode']
+  //    Windows 还要 pip_system_certs：不装就会在 aisubtitle.hdslb.com 上报 TLS 根证书错误。
+  const VENV_DEPS = ['bilibili_api', 'mcp', 'qrcode', ...(process.platform === 'win32' ? ['pip_system_certs'] : [])]
   const missingVenvDeps = () => VENV_DEPS.filter((n) => !hasPkg(join(stateDir, '.venv'), n))
   const venvReadyNow = () => existsSync(venvPython()) && missingVenvDeps().length === 0
   const asrReadyNow = () => existsSync(asrPython()) && hasPkg(asrDir, 'faster_whisper')
@@ -212,8 +221,8 @@ export function apply(ctx, config) {
    */
   const DEFAULTS = {
     perDay: 5, peakValley: false, noon: true, night: true, autoComment: false, transcribe: false, asrModel: 'small',
-    dmMode: 'off', dmUid: 0, qqForwardUrl: '', qqForwardToken: '', qqBackend: 'napcat-plugin', qqGroupIds: '', qqPrivateIds: '', briefMode: true, githubEnabled: true, githubToken: '', githubDiscover: true, workflowScan: true, scheduleEnabled: false, scheduleTime: '09:00',
-    keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
+    dmMode: 'off', dmUid: 0, qqForwardUrl: '', qqForwardToken: '', qqBackend: 'off', qqGroupIds: '', qqPrivateIds: '', briefMode: true, githubEnabled: true, githubToken: '', githubDiscover: true, workflowScan: true, scheduleEnabled: false, scheduleTime: '09:00',
+    keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, overlayModel: true, guiProfile: 'desktop', modelLayerFile: '', workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -249,9 +258,12 @@ export function apply(ctx, config) {
     if ('commentPerRound' in p) p.commentPerRound = Math.max(0, Math.min(Number(p.commentPerRound) || 0, 20))
     if ('qqForwardUrl' in p) p.qqForwardUrl = String(p.qqForwardUrl || '').trim()
     if ('qqForwardToken' in p) p.qqForwardToken = String(p.qqForwardToken || '')
-    if ('qqBackend' in p) p.qqBackend = String(p.qqBackend) === 'onebot' ? 'onebot' : 'napcat-plugin'
+    if ('qqBackend' in p) p.qqBackend = ['off', 'napcat-plugin', 'onebot'].includes(String(p.qqBackend)) ? String(p.qqBackend) : 'off'
     if ('qqGroupIds' in p) p.qqGroupIds = String(p.qqGroupIds || '').trim()
     if ('qqPrivateIds' in p) p.qqPrivateIds = String(p.qqPrivateIds || '').trim()
+    if ('overlayModel' in p) p.overlayModel = Boolean(p.overlayModel)
+    if ('guiProfile' in p) p.guiProfile = String(p.guiProfile || '').trim() || 'desktop'
+    if ('modelLayerFile' in p) p.modelLayerFile = String(p.modelLayerFile || '').trim()
     if ('githubToken' in p) p.githubToken = String(p.githubToken || '').trim()
     if ('scheduleTime' in p) {
       const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(p.scheduleTime || '').trim())
@@ -311,8 +323,19 @@ export function apply(ctx, config) {
   const loadCfg = () => {
     const saved = savedCfg()
     const row = settingsDesc()
+    // ⭐ 老配置兼容：以前没有 qqBackend，只填了 qqForwardUrl 就代表 NapCat 插件投递。
+    //    新默认是 off；只有「两边都没显式写过 qqBackend」时才按老配置推断，用户后来亲手选 off 不会被改回来。
+    const applyLegacyQQBackend = (out, user) => {
+      const rawSaved = readJson(cfgFile, {})
+      const userHasBackend = Object.prototype.hasOwnProperty.call(user || {}, 'qqBackend')
+      const rawHasBackend = Object.prototype.hasOwnProperty.call(rawSaved || {}, 'qqBackend')
+      if (!touched.has('qqBackend') && !userHasBackend && !rawHasBackend && String(out.qqForwardUrl || '').trim()) {
+        out.qqBackend = 'napcat-plugin'
+      }
+      return out
+    }
     // ⭐ 读回来统一过一遍范围：原生设置页那边我们是钳不到写的（见 clampPatch 的注释）
-    if (!row) return clampPatch(saved)
+    if (!row) return clampPatch(applyLegacyQQBackend(saved, {}))
     const user = row.user || {}
     // ⭐ 2026-10-19（另一位用户的 dsh 给出的更彻底的一招）：**别用闭包里那份 `config` 当宿主基准** ——
     //    桌面版里它是挂载时的快照，之后写进 `cordis.patch.yml` 的值不会热刷新进来 ✗
@@ -345,6 +368,7 @@ export function apply(ctx, config) {
     for (const k of touched) {
       if (k in DEFAULTS && user[k] !== undefined && JSON.stringify(user[k]) !== JSON.stringify(out[k])) diff.push(k)
     }
+    applyLegacyQQBackend(out, user)
     hostDiff = diff
     const sig = diff.slice().sort().join(',')
     if (sig && sig !== lastDiffSig) {
@@ -455,7 +479,12 @@ export function apply(ctx, config) {
     return client.call(toolName, args, opts)
   }
 
-  const qqOneBotMode = () => String(cfg.qqBackend || 'napcat-plugin') === 'onebot'
+  const qqBackendNow = () => {
+    const v = String(cfg.qqBackend || 'off')
+    return v === 'onebot' ? 'onebot' : v === 'napcat-plugin' ? 'napcat-plugin' : 'off'
+  }
+  const qqOneBotMode = () => qqBackendNow() === 'onebot'
+  const qqEnabled = () => qqBackendNow() !== 'off'
   const splitQQIds = (v) => {
     const arr = Array.isArray(v) ? v : String(v || '').split(/[\s,，;；]+/)
     return [...new Set(arr.map((x) => String(x).trim()).filter(Boolean))]
@@ -467,6 +496,14 @@ export function apply(ctx, config) {
     groups: splitQQIds(cfg.qqGroupIds),
     privates: splitQQIds(cfg.qqPrivateIds),
   })
+  /** 投递目标只维护一份：NapCat 插件与 OneBot 都从这里取。 */
+  const qqTargetList = () => {
+    const { groups, privates } = oneBotTargets()
+    return [
+      ...groups.map((id) => ({ kind: 'group', id })),
+      ...privates.map((id) => ({ kind: 'private', id })),
+    ]
+  }
   const oneBotPost = async (endpoint, payload) => {
     const base = oneBotBase()
     if (!base) return { ok: false, skipped: 'no-url' }
@@ -529,6 +566,7 @@ export function apply(ctx, config) {
 
   /** 把发出去的评论/私信/简报投递到 QQ；失败只记日志，不影响 B 站这一轮。 */
   const notifyQQ = async (event) => {
+    if (!qqEnabled()) return { ok: false, skipped: 'off' }
     if (qqOneBotMode()) return notifyOneBot(event)
     const configured = String(cfg.qqForwardUrl || '').trim()
     if (!configured) return { ok: false, skipped: 'no-url' }
@@ -542,7 +580,7 @@ export function apply(ctx, config) {
         const res = await fetch(url, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ source: 'dsh-bili-scroll', time: new Date().toISOString(), ...event }),
+          body: JSON.stringify({ source: 'dsh-bili-scroll', time: new Date().toISOString(), targets: qqTargetList(), ...event }),
           signal: AbortSignal.timeout(30000),
         })
         if (!res.ok) {
@@ -579,20 +617,23 @@ export function apply(ctx, config) {
       if (cur) chunks.push(cur)
       parts = chunks
     }
+    if (parts.length > 8) log(`QQ 版切成 ${parts.length} 段，只发前 8 段（后面的请直接看 ${dayKey()}.md）`)
     return parts.slice(0, 8)
   }
 
   const deliverBrief = async (code) => {
     if (cfg.briefMode === false) return
+    if (!qqEnabled()) return
     if (!String(cfg.qqForwardUrl || '').trim()) return
     if (code !== 0) { log(`简报未发送：headless 退出码 ${code}`); return }
     const day = dayKey()
     let text = ''
     try { text = readFileSync(join(outDir, `${day}.qq.md`), 'utf8') } catch { /* fallback below */ }
-    if (!text.trim()) {
+    // QQ 版缺失 / 过短（例如只写了一句“超限提示”）时退回完整报告，别因此整条不发。
+    if (!text.trim() || text.length < 200) {
       try { text = readFileSync(join(outDir, `${day}.md`), 'utf8') } catch { /* nothing */ }
     }
-    if (!text.trim() || text.length < 200) { log('简报未发送：QQ 版为空或过短'); return }
+    if (!text.trim() || text.length < 200) { log('简报未发送：QQ 版和完整报告都为空或过短'); return }
     const hash = createHash('sha1').update(text).digest('hex')
     const st = readJson(dutyStateFile, {})
     if (st.briefHash === hash) { log('QQ 简报内容未变化，跳过重复发送'); return }
@@ -852,8 +893,9 @@ export function apply(ctx, config) {
     description: '读 / 改「刷B站」的设置。不给 `patch` 就是读；给了就改（只认 schema 里的字段）。\n'
       + '例：`{"perDay":5,"peakValley":true,"noon":true,"night":true,"autoComment":false,"transcribe":false,"keywords":["DeepSeek Harness"]}`；'
       + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）。'
-      + 'QQ 转发：`{"qqForwardUrl":"http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward","qqForwardToken":"..."}`。 '
-      + 'OneBot：`{"qqBackend":"onebot","qqForwardUrl":"http://127.0.0.1:3000","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。',
+      + 'QQ 转发：`{"qqBackend":"napcat-plugin","qqForwardUrl":"http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward","qqForwardToken":"...","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。'
+      + 'OneBot：`{"qqBackend":"onebot","qqForwardUrl":"http://127.0.0.1:3000","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。'
+      + '关闭：`{"qqBackend":"off"}`。',
     parameters: { patch: { type: 'object', additionalProperties: true, description: '要改的字段（可省）' } },
     async execute(args) {
       let host = null
@@ -1095,8 +1137,11 @@ export function apply(ctx, config) {
     const left = Math.max(0, quota - already)
     // ⭐ 投递方式（2026-10-17 加）：dmMode = off（只评论）· only（只私信）· both（都发）
     //    commentOn 是"这一轮到底能不能发公开评论"的唯一判据（工具层的闸用的是同一套逻辑）
-    const commentOn = Boolean(cfg.autoComment && cfg.mentionName && cfg.dmMode !== 'only')
-    const dmOn = Boolean(cfg.dmMode !== 'off' && Number(cfg.dmUid) > 0)
+    // ⭐ QQ 接手后强制关掉 B站私信：投递渠道有且只有一个，避免同一条内容两边重复。
+    const qqOn = qqEnabled()
+    const dmMode = qqOn ? 'off' : String(cfg.dmMode || 'off')
+    const commentOn = Boolean(cfg.autoComment && cfg.mentionName && dmMode !== 'only')
+    const dmOn = Boolean(!qqOn && dmMode !== 'off' && Number(cfg.dmUid) > 0)
     if (cfg.briefMode !== false) {
       let brief = ''
       try { brief = readFileSync(join(stateDir, 'brief-prompt.txt'), 'utf8') } catch { /* use fallback below */ }
@@ -1106,6 +1151,9 @@ export function apply(ctx, config) {
       const fill = (k, v) => { text = text.split('{{' + k + '}}').join(String(v)) }
       fill('CHARTER', duty)
       fill('DATE', dayKey())
+      fill('PER_DAY', quota)
+      fill('ALREADY', already)
+      fill('LEFT', left)
       fill('KEYWORDS', kws.length ? kws.join('、') : '（用章程里的默认关键词）')
       fill('GITHUB_STATUS', ghOn ? '开启' : '关闭')
       fill('DISCOVER_STATUS', cfg.githubDiscover !== false ? '开启' : '关闭')
@@ -1148,9 +1196,10 @@ export function apply(ctx, config) {
       + `这是**给以后检索用**的（报告是给人看的，归档是给"回头翻"用的），别省略、也别只写挑中的。`
       + `自动评论并 @ ${cfg.mentionName || '（还没填要 @ 谁）'} 是${commentOn
         ? `开着的（每轮最多 ${cfg.commentPerRound} 条评论，每条在正文里纯文本 @ ${cfg.mentionName}，150 字内）`
-        : (cfg.dmMode === 'only'
+        : (dmMode === 'only'
           ? '关着的 —— 当前是「**只私信**」模式：**这一轮一条公开评论都不许发**，改走私信'
           : '关着的（只写报告，别发评论）')}。`
+      + (qqOn ? 'QQ 投递已经开启：这一轮**禁止**使用 bili_send_message（B站私信），全部投递交给 QQ。' : '')
       + (dmOn
         ? `⭐⭐ **私信投递**：用 bili_send_message 把这一轮的结果发到 UID **${Number(cfg.dmUid)}**。`
           + `内容**别照抄评论那套**：把本轮每条值得的写成 **标题 + 链接 + 一句话理由**`
@@ -1167,7 +1216,7 @@ export function apply(ctx, config) {
           + `⚠️ **不要**把「无字幕跳过 N 条」这种统计口径搬进私信 —— 那是**报告**里写的，不是私信里写的。）`
           + `⚠️ 私信里**不用 @ 任何人**；⚠️ **一轮只发一条私信**（多条合并成一条）；`
           + `⚠️ 私信里**不要**写"本鱼 / 本鲸 / 主人 / 人家"那套；⚠️ 发完把"已私信"记进报告（**报告里**可以写口径）。`
-          + (cfg.dmMode === 'both' ? `⚠️ 现在是 **both**：公开评论照发（走下面那一整套规矩），私信**另外**再发一条。` : '')
+          + (dmMode === 'both' ? `⚠️ 现在是 **both**：公开评论照发（走下面那一整套规矩），私信**另外**再发一条。` : '')
         : '')
       + (cfg.replyToComments
         ? `回复评论：开着（每轮最多回 ${Number(cfg.replyPerRound) || 1} 条）—— 只回「直接回复到你那条评论下面的人」，回完记进报告；找不到你那条评论就跳过，别硬找。`
@@ -1193,11 +1242,53 @@ export function apply(ctx, config) {
   const mcpWhitelist = () => {
     const list = ['bili_search', 'bili_subtitle', 'bili_comments', 'bili_video_info']
     if (cfg.autoComment || cfg.replyToComments) list.push('bili_reply')
-    if (String(cfg.dmMode || 'off') !== 'off') list.push('bili_send_message')
+    const dmOn = !qqEnabled() && String(cfg.dmMode || 'off') !== 'off' && Number(cfg.dmUid) > 0
+    if (dmOn) list.push('bili_send_message')
     if (cfg.briefMode !== false && cfg.githubEnabled !== false) {
       list.push('github_search', 'github_repo', 'github_tree', 'github_file', 'github_releases', 'github_workflows')
     }
     return list
+  }
+
+  /**
+   * ⭐ 模型层由**用户自己**决定，插件只做镜像：把 GUI profile 的 patch 里
+   *    llm-pi-ai / agent-default-model 两块原文抄进 headless 的 --patch overlay。
+   *    用户在设置页换的模型，日报那一轮跟着换；插件一个字都不写回 profile/home。
+   *    抄不到（用的是 DSH 自带账号模型）= 什么都不写，走 headless 默认，这是对的。
+   */
+  const mirrorModelLayer = () => {
+    if (cfg.overlayModel === false) return []
+    const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
+    const profileRoot = join(dshHome, 'profiles')
+    const files = []
+    const add = (f) => { const v = String(f || '').trim(); if (v && !files.includes(v)) files.push(v) }
+    if (String(cfg.modelLayerFile || '').trim()) add(String(cfg.modelLayerFile).trim())
+    const exclude = String(cfg.headlessProfile || 'headless')
+    const addProfile = (name) => {
+      const n = String(name || '').trim()
+      if (n && n !== exclude) add(join(profileRoot, n, 'cordis.patch.yml'))
+    }
+    addProfile(process.env.DSH_PROFILE)
+    addProfile(cfg.guiProfile || 'desktop')
+    for (const n of ['desktop', 'web']) addProfile(n)
+    try {
+      const names = readdirSync(profileRoot, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b))
+      for (const n of names) addProfile(n)
+    } catch { /* 没有 profiles 目录就按“抄不到”处理 */ }
+    for (const f of files) {
+      let text = ''
+      try { text = readFileSync(f, 'utf8') } catch { continue }
+      const hit = extractModelBlocks(text)
+      if (hit.length) {
+        log(`模型层：从 ${f} 抄到 ${hit.length} 块`)
+        return hit.map((b) => b.text)
+      }
+    }
+    log('模型层：profile patch 里没有 llm-pi-ai / agent-default-model ⇒ headless 用自带账号模型')
+    return []
   }
 
   const ensureOverlay = () => {
@@ -1220,6 +1311,8 @@ export function apply(ctx, config) {
     //    在别的机器上必然 MISSING_CREDENTIAL。保留上面的 credentials / authorization /
     //    deepseek-account 开关，以及下面的 MCP insert。
 
+    if (cfg.overlayModel !== false) yml.push(...mirrorModelLayer())
+
     if (cfg.overlayMcp) {
       yml.push(
         '- insert:',
@@ -1233,8 +1326,9 @@ export function apply(ctx, config) {
         `          - '${posix(script)}'`,
         '        env:',
         `          BILI_MCP_TOOLS: '${mcpWhitelist().join(',')}'`,
-        `          BILI_DUTY_QQ_WEBHOOK: '${String(cfg.qqForwardUrl || '').replace(/'/g, "''")}'`,
+        `          BILI_DUTY_QQ_WEBHOOK: '${String(qqBackendNow() === 'napcat-plugin' ? (cfg.qqForwardUrl || '') : '').replace(/'/g, "''")}'`,
         `          BILI_DUTY_QQ_TOKEN: '${String(cfg.qqForwardToken || '').replace(/'/g, "''")}'`,
+        `          BILI_DUTY_QQ_TARGETS: '${JSON.stringify(qqTargetList()).replace(/'/g, "''")}'`,
         `          BILI_DUTY_GITHUB_TOKEN: '${String(cfg.githubToken || '').replace(/'/g, "''")}'`,
         '',
       )
@@ -1354,15 +1448,31 @@ export function apply(ctx, config) {
     child.on('exit', (code) => {
       log(`刷B站结束（${why}，code=${code}）`)
       stubReportIfMissing(code)   // ⭐ 没写报告就补一份占位 —— 别让使用者什么都看不到
-      void deliverBrief(code)     // 简报生成后自动发 QQ；失败只记日志，不影响报告
       rotateLogIfBig()            // ⭐ 日志别无声地长（三天 797KB ⇒ 一年约 100MB）
       // ⭐ 这一轮挑了几条：从今天的报告里数（上一轮挑的还在同一份文件里 ⇒ 数出来就是全天的账）
       try {
         const st = readJson(dutyStateFile, {})
         const prev = st.day === dayKey() ? Number(st.picked || 0) : 0
         const picked = countPickedToday()   // 报告是事实来源、state 只是兜底（跟闸门同一个算法）
-        if (picked > prev) { bumpState({ picked }); log(`今天挑到 ${picked} 条（上限 ${Number(cfg.perDay) || 0} 条）`) }
+        const quota = Math.max(0, Number(cfg.perDay) || 0)
+        if (picked > prev) { bumpState({ picked }); log(`今天挑到 ${picked} 条（上限 ${quota} 条）`) }
+        if (picked > quota) {
+          log(`⚠️ 超出每日上限：报告里 ${picked} 条 > perDay ${quota}（提示词没拦住，下一轮闸门会按 0 额度处理）`)
+          try {
+            const qqFile = join(outDir, `${dayKey()}.qq.md`)
+            if (existsSync(qqFile)) {
+              const old = readFileSync(qqFile, 'utf8')
+              const marker = '⚠️ 这份日报超出每日上限'
+              if (!old.includes(marker)) {
+                appendFileSync(qqFile, `\n---\n${marker}（${picked}/${quota}），已按上限关注前 ${quota} 条。\n`, 'utf8')
+              }
+            } else {
+              log('QQ 版不存在，超限提示只写进日志')
+            }
+          } catch (e) { log(`写超限提示失败（不影响报告）：${e?.message ?? e}`) }
+        }
       } catch (e) { log(`数挑了几条时出错（不影响这一轮）：${e?.message ?? e}`) }
+      void deliverBrief(code)     // 简报生成后自动发 QQ；失败只记日志，不影响报告
       // ⭐ 发完评论之后**过一会儿再核一次**（2026-10-16 加的「评论发出后复核」）：
       //    接口回"发送成功"≠ 公开可见（新号/风控会进审核）；而"不公开"时连 @ 通知都不会推 ⇒
       //    插件会以为发了、下一轮不再发 ⇒ 一条都没到人。等 90 秒再查，避免把"还在审核"误判成"没发出去"。
@@ -1762,6 +1872,8 @@ export function apply(ctx, config) {
     ...cfg,
     githubToken: '',
     githubTokenSet: Boolean(String(cfg.githubToken || '').trim()),
+    qqForwardToken: '',
+    qqForwardTokenSet: Boolean(String(cfg.qqForwardToken || '').trim()),
   })
 
   const nextScheduleAt = () => {
@@ -1834,7 +1946,7 @@ export function apply(ctx, config) {
       const patch = {}
       for (const k of ['perDay', 'peakValley', 'noon', 'night', 'autoComment', 'transcribe', 'asrModel',
         'commentPerRound', 'mentionName', 'dmMode', 'dmUid',
-        'keywords', 'pythonPath', 'dshBin', 'headlessProfile', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
+        'keywords', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
         if (k in body) patch[k] = body[k]
       }
       // ⭐ 范围钳制 + 两份都写（config.json / DSH 原生设置页），统一走 persistCfg —— 见文件上方
@@ -1842,7 +1954,7 @@ export function apply(ctx, config) {
       if ('dmMode' in patch) patch.dmMode = ['off', 'only', 'both'].includes(String(patch.dmMode)) ? String(patch.dmMode) : 'off'
       if ('dmUid' in patch) patch.dmUid = Math.max(0, Math.min(Number(patch.dmUid) || 0, Number.MAX_SAFE_INTEGER))
       const { clean, host } = await persistCfg(patch)
-      const safeClean = { ...clean, githubToken: clean.githubToken ? '[set]' : '' }
+      const safeClean = { ...clean, githubToken: clean.githubToken ? '[set]' : '', qqForwardToken: clean.qqForwardToken ? '[set]' : '' }
       log(`设置已更新：${JSON.stringify(safeClean)}（DSH 那边${host.ok ? '已同步' : '没写成：' + host.error}）`)
       return sendJson(res, 200, { ok: true, config: publicCfg(), host })
     }
