@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.9
+
+### Changed
+- 面板定时开关按模式置灰，文案与 `tick()` 实际行为对齐（行为零变化）：
+  日报模式下峰谷开关置灰，非日报模式下每日定时置灰；`status().nextRunAt` 在非日报模式下为 `null`
+
+### Docs
+- 补全 13 个未文档化的配置键（schema 35 键 ↔ 文档 35 行），
+  新增「会对外发东西的开关」与「调度：两套窗口互斥」两节
+
+### Fixed
+- `overlayMcp = false` 时 `status()` 报 `degraded: ['mcp-off']`，面板红字提示“这一轮没有任何工具”
+  （不自动改回 true、也不阻止跑）
+- `headlessProfile` 不存在时，先给中文报错并返回，不再让子进程吐英文 `profile not found`
+
+### Added
+- `lib/prompt.mjs` + `scripts/prompt-smoke.mjs`：把“提示词里必须有人设”变成断言
+  （C/D 两条专门盯“没拼 ownerBlock”的回归）
+- `scripts/audit-config.mjs`：配置键消费点 / 占位符↔fill / client↔路由 / volatile 四项得体检，
+  默认只警告，`--strict` 才非零；已挂进 `.github/workflows/ci.yml`
+
 ## 0.1.8
 
 ### Fixed
