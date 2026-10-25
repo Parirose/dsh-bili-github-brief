@@ -25,6 +25,7 @@
 | `transcribe` | false | 无字幕时是否本地转写 |
 | `asrModel` | small | Whisper 模型大小 |
 | `reportLevel` | full | 报告详细程度 |
+| `workspace` | 空 | 工作区路径；会读这里的 `AGENTS.md` 当作人设（日报模式也生效，仅影响语气 / 称呼）|
 
 ## GitHub Token
 

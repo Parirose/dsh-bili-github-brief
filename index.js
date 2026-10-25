@@ -1113,10 +1113,10 @@ export function apply(ctx, config) {
     //    ⇒ 在拼提示词这一步把**绝对路径**填进去，别让它猜（我们的老规矩：提示词一律给绝对路径）
     try { duty = String(duty).split('<家目录>').join(stateDir) } catch { /* 替换失败就按原文用 */ }
     const kws = Array.isArray(cfg.keywords) ? cfg.keywords.filter(Boolean) : []
-    // ⭐ 开场先让它读**工作区**的 AGENTS.md —— 这一轮的工作目录就是使用者的工作区，
-    //    AGENTS.md 本来就会自动注入；这里再点一句，保证它真按使用者的设定来（别人的设定同理）。
-    // ⭐ 那一轮的工作目录是**插件家**（沙箱只让它写自己工作目录里的东西 ✗），
-    //    所以"使用者的设定"由**我们自己读进来**喂给它 —— 它在宿主进程里跑，没有沙箱限制 ✓
+    // ⭐ 那一轮的工作目录是**插件家**（runDuty 里 cwd = stateDir），宿主不会自动加载工作区的 AGENTS.md
+    //    ⇒ **必须由我们自己读进来塞进提示词**（它在宿主进程里跑，没有沙箱限制 ✓）。
+    //    ⚠️ 2026-10-25 修：以前这里写的是“工作目录就是使用者的工作区、AGENTS.md 会自动注入”——
+    //    那个假设已经不成立：日报分支当时根本没用 ownerDoc ⇒ 人设没生效。
     let ownerDoc = ''
     try {
       // ⚠️ 2026-10-16 用户反馈（"只要给人设就会走偏"）：留空时我们以前退到 `process.cwd()`，
@@ -1150,7 +1150,6 @@ export function apply(ctx, config) {
       const ghTokenSet = Boolean(String(cfg.githubToken || '').trim())
       let text = brief
       const fill = (k, v) => { text = text.split('{{' + k + '}}').join(String(v)) }
-      fill('CHARTER', duty)
       fill('DATE', dayKey())
       fill('PER_DAY', quota)
       fill('ALREADY', already)
@@ -1161,9 +1160,18 @@ export function apply(ctx, config) {
       fill('WORKFLOW_STATUS', cfg.workflowScan !== false ? '开启' : '关闭')
       fill('REPORT_PATH', join(outDir, `${dayKey()}.md`))
       fill('QQ_PATH', join(outDir, `${dayKey()}.qq.md`))
+      // ⭐ 2026-10-25：日报分支也必须把使用者的 AGENTS.md 塞进提示词（以前只有非日报分支拼了 ownerDoc）
+      const ownerBlock = ownerDoc || '（这一轮没有拿到使用者的设定：工作区没填，或那个目录里没有 AGENTS.md ⇒ 按中性说话，别扮演任何人、也别自己编一套。）'
+      // ⚠️ 空模板的兜底要先判（否则下面一追加 ownerBlock，text 就不空了，兜底永远进不去）
       if (!text.trim()) {
-        text = `你是我的 B站 + GitHub AIGC 情报员。先读章程 ${duty}，按章程生成 B站 + GitHub 日报。关键词：${kws.join('、')}。报告写到 ${join(outDir, `${dayKey()}.md`)}，QQ 版写到 ${join(outDir, `${dayKey()}.qq.md`)}。不要发 B站评论或私信。`
+        text = `你是我的 B站 + GitHub AIGC 情报员。按下面的规则生成 B站 + GitHub 日报。关键词：${kws.join('、')}。报告写到 ${join(outDir, `${dayKey()}.md`)}，QQ 版写到 ${join(outDir, `${dayKey()}.qq.md`)}。不要发 B站评论或私信。`
+          + '\n\n' + ownerBlock
+          + '\n\n⭐ 上面那份设定只影响语气和称呼；不编造、不发 B站评论或私信、报告路径这些规则优先。'
+        return text
       }
+      fill('OWNER_DOC', ownerBlock)
+      // ⚠️ 用户把家里那份模板改成了旧版（没有 {{OWNER_DOC}} 占位）时，人设不能又丢 ⇒ 直接追加到末尾
+      if (!brief.includes('{{OWNER_DOC}}')) text = text.replace(/\s*$/, '') + '\n\n' + ownerBlock + '\n'
       return text
     }
     return `你是这个账号的 B站 助手。`
