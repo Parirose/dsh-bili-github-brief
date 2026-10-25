@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.6
+
+### Fixed
+- `scripts/smoke-apply.mjs` 在 Windows 上的假失败：清理临时目录时 `fs.rmSync` 会和
+  刚铺进去的文件句柄 / 索引 / 杀软扫描抢文件，报 `ENOTEMPTY` / `EBUSY`，
+  被当成「apply() 抛异常」⇒ 冷启动那一项判 FAIL（实际插件完全正常）
+  ⇒ 现在 `fs.rmSync` 带 `maxRetries: 10` / `retryDelay: 150`，清理失败只 `warn`，
+  不计入失败项；异常措辞带 `e.code`（区分「apply 真崩」和「清理失败」）
+- `docs/INSTALL.md` 补一句：Windows 上看到清理告警属正常，只要结果是「全部通过」就行
+
 ## 0.1.5
 
 ### Fixed

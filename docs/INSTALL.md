@@ -80,6 +80,8 @@ node scripts/smoke-apply.mjs
 ```
 
 `smoke-apply` 用假 ctx 真跑一遍 `apply()`（冷启动 / 老配置 / 显式 off / Settings 已就绪）。
+Windows 上如果看到一行「临时目录没清干净，忽略：ENOTEMPTY / EPERM」，那是清理告警（杀软 / 索引抢文件），
+**属正常**：只要结果是「全部通过」就行。
 `node --check` 只查语法，查不出 `Cannot access 'x' before initialization` 这类初始化顺序错误 ——
 v0.1.4 就是这么崩的，所以这条必须跑。
 

@@ -69,9 +69,20 @@ async function runOnce(name, { config = null, row = null } = {}) {
   } finally {
     if (prev === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = prev
-    fs.rmSync(home, { recursive: true, force: true })
+    // ⚠️ Windows 上 apply() 刚往这个目录里铺过文件（mcp_server.py / brief-prompt.txt 等），
+    //    rmSync 会和写入句柄 / 索引 / 杀软扫描抢文件 ⇒ ENOTEMPTY/EBUSY。
+    //    清理失败**不能**算测试失败（否则 Windows 用户每次自检都看到一个假 FAIL）。
+    //    maxRetries / retryDelay 是 fs.rmSync 自带的 Windows 重试参数，不用自己写循环。
+    try {
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 })
+    } catch (e) {
+      console.warn('  （临时目录没清干净，忽略：' + (e?.code || e?.message) + '，路径 ' + home + '）')
+    }
   }
 }
+
+/** 把异常变成一行能看懂的话（带 code 方便排查） */
+const why = (e) => (e && e.code ? e.code + '：' : '') + (e && e.message ? e.message : String(e))
 
 console.log('plugin root : ' + root)
 console.log('')
@@ -86,7 +97,7 @@ try {
   if (tools.length > 0) ok('注册了 ' + tools.length + ' 个工具')
   else bad('一个工具都没注册 —— 插件没激活')
 } catch (e) {
-  bad('apply() 抛异常：' + (e && e.message ? e.message : e))
+  bad('apply() 真崩了（' + why(e) + '）')
   console.log(String(e && e.stack ? e.stack : '').split('\n').slice(1, 4).join('\n'))
 }
 
@@ -95,14 +106,14 @@ try {
   const { st } = await runOnce('legacy', { config: { qqForwardUrl: 'http://127.0.0.1:6099/plugin/x/api/forward' } })
   if (st && st.config && st.config.qqBackend === 'napcat-plugin') ok('自动按 napcat-plugin 处理')
   else bad('qqBackend = ' + (st && st.config ? st.config.qqBackend : '?') + '（应为 napcat-plugin）')
-} catch (e) { bad('apply() 抛异常：' + (e && e.message ? e.message : e)) }
+} catch (e) { bad('apply() 真崩了（' + why(e) + '）') }
 
 console.log('[3/4] 用户显式选 off 不被改回')
 try {
   const { st } = await runOnce('off', { config: { qqForwardUrl: 'http://127.0.0.1:6099/plugin/x/api/forward', qqBackend: 'off' } })
   if (st && st.config && st.config.qqBackend === 'off') ok('保持 off')
   else bad('qqBackend = ' + (st && st.config ? st.config.qqBackend : '?') + '（应为 off）')
-} catch (e) { bad('apply() 抛异常：' + (e && e.message ? e.message : e)) }
+} catch (e) { bad('apply() 真崩了（' + why(e) + '）') }
 
 console.log('[4/4] Settings 服务已就绪（有 row）')
 try {
@@ -110,7 +121,7 @@ try {
   const { routes, st } = await runOnce('row', { row })
   if (routes.length === 1 && st && st.ok === true) ok('有 row 时也正常')
   else bad('有 row 时路由/状态异常')
-} catch (e) { bad('apply() 抛异常：' + (e && e.message ? e.message : e)) }
+} catch (e) { bad('apply() 真崩了（' + why(e) + '）') }
 
 console.log('')
 if (failed) {
