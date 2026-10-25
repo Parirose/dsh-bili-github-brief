@@ -1,0 +1,25 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # 提示词里必须有人设（0.1.8 那个 bug 只能靠真渲染才能防住）
+      - name: prompt smoke
+        run: node scripts/prompt-smoke.mjs
+
+      # 配置键 / 占位符 / 路由 的体检（先以非 strict 运行，观察一两个月再考虑转 strict）
+      - name: audit config (warn only)
+        run: node scripts/audit-config.mjs
+
+      # 注意：smoke-apply.mjs 需要宿主树（schemastery / dsh-tools），
+      # CI 里没有 DSH 安装 ⇒ 放在本机自检里跑，不进 CI。
