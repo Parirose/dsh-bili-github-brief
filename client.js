@@ -144,6 +144,7 @@ window.__ModuleLoader__.load({
       const [msg, setMsg] = React.useState('')
       const [msgTone, setMsgTone] = React.useState('')
       const [kws, setKws] = React.useState(null)
+      const [gkw, setGkw] = React.useState(null)
       const [ws, setWs] = React.useState(null)
       const [rl, setRl] = React.useState(null)
       const [newVer, setNewVer] = React.useState('')       // 发现的新版本号（空 = 没发现）          // 日报形态：full / brief / off
@@ -179,6 +180,7 @@ window.__ModuleLoader__.load({
       const cfg = st?.config
       React.useEffect(() => {
         if (cfg && kws === null) setKws((cfg.keywords || []).join('\n'))
+        if (cfg && gkw === null) setGkw((cfg.guaranteeKeywords || []).join('\n'))
         if (cfg && ws === null) setWs(cfg.workspace || '')
         if (cfg && rl === null) setRl(cfg.reportLevel || 'full')
         if (cfg && perDay === null) setPerDay(String(cfg.perDay ?? 5))
@@ -362,13 +364,14 @@ window.__ModuleLoader__.load({
 
       const onSaveText = async () => {
         const list = String(kws || '').split('\n').map((s) => s.trim()).filter(Boolean)
-        await patch({ keywords: list, workspace: String(ws || '').trim() }, '关键词与工作区')
+        const glist = String(gkw || '').split('\n').map((s) => s.trim()).filter(Boolean)
+        await patch({ keywords: list, guaranteeKeywords: glist, workspace: String(ws || '').trim() }, '关键词与工作区')
       }
 
       if (!cfg) {
         return h('div', { 'data-bd-page': '' },
           h('div', { 'data-bd-note': '' }, fails >= 3
-            ? '读不到插件配置（已经试了 ' + fails + ' 次）。常见原因有三个：装的还是 0.1.11 / 0.1.12（那两版有 bug，会卡在这里）；刚装完没重启 dsh；或者插件加载失败。'
+            ? '读不到插件配置（已经试了 ' + fails + ' 次）。常见原因有三个：刚装完没重启 dsh；插件加载失败（duty.log 里有堆栈）；或者装的是很老的版本。'
             : '读设置中…'),
           fails >= 6 ? h('div', { 'data-bd-note': '' },
             '可以先试：升级到最新版（dsh plugin --profile web add github:Parirose/dsh-bili-github-brief）→ 重启 dsh；还不行就把 ' +
@@ -650,6 +653,15 @@ window.__ModuleLoader__.load({
             'data-bd-input': '', rows: 5, placeholder: '一行一个关键词；留空用内置那几组',
             value: kws ?? '', onChange: (e) => setKws(e.target.value),
           }),
+          h('div', { 'data-bd-label': '' }, '保底关键词（一行一个，每轮至少挑 1 条）'),
+          h('textarea', {
+            'data-bd-input': '', rows: 3, placeholder: 'dsh 插件\nDeepSeek',
+            value: gkw ?? '', onChange: (e) => setGkw(e.target.value),
+          }),
+          h('div', { 'data-bd-note': '' },
+            '这一组每轮至少进 1 条、最多 2 条，占「每天最多挑几条」的名额（不是额外加量）；留空 = 不启用。',
+            h('br'),
+            '用途：某一类内容（比如 dsh 插件）总被别的类挤光时，给它留个保底位。一条都不达标就在「数据缺口」里说明，不拿低质内容凑数。'),
           h('div', { 'data-bd-label': '' }, '工作区（它按这里的 AGENTS.md 认设定）'),
           h('input', {
             'data-bd-input': '', value: ws ?? '',

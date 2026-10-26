@@ -41,6 +41,7 @@ English: A DSH + NapCat plugin that builds a daily AIGC brief from Bilibili and 
 - NapCat 多群、多私聊、多段投递；目标只在 DSH 插件设置填一次
 - QQ 投递支持 NapCat 插件或 OneBot v11 HTTP 直传，`off` 可彻底关闭
 - 每日定时开关，默认 09:00，默认关闭
+- 保底关键词组：指定一类内容（例如 `dsh 插件`）每轮至少进 1 条、最多 2 条，避免被高频类目挤光
 
 ## 仓库结构
 

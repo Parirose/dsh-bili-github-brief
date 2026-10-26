@@ -91,6 +91,8 @@ export const Config = !z ? undefined : z.object({
   mentionName: z.string().default('').extra('volatile', true),
   /** 关注关键词（空了用章程里默认那几组） */
   keywords: z.array(z.string()).default([]).extra('volatile', true),
+  /** 保底关键词组：这一组每轮至少挑 1 条、最多 2 条（解决某类内容被别的类挤光）；占 perDay 名额，不额外加量 */
+  guaranteeKeywords: z.array(z.string()).default([]).extra('volatile', true),
   /** Python：指向 venv 里的那个最好 */
   pythonPath: z.string().default('python').extra('volatile', true),
   /** dsh 的 bin.js（不填就试自动探测，再退化成 shell 里的 dsh） */
@@ -239,7 +241,7 @@ export function apply(ctx, config) {
   const DEFAULTS = {
     perDay: 5, peakValley: false, noon: true, night: true, autoComment: false, transcribe: false, asrModel: 'small',
     dmMode: 'off', dmUid: 0, qqForwardUrl: '', qqForwardToken: '', qqBackend: 'off', qqGroupIds: '', qqPrivateIds: '', briefMode: true, githubEnabled: true, githubToken: '', githubDiscover: true, workflowScan: true, scheduleEnabled: false, scheduleTime: '09:00',
-    keywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, overlayModel: true, guiProfile: 'desktop', modelLayerFile: '', stateDir: '', workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
+    keywords: [], guaranteeKeywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, overlayModel: true, guiProfile: 'desktop', modelLayerFile: '', stateDir: '', workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
   }
   const normalize = (src, base) => {
     const out = { ...base }
@@ -919,6 +921,7 @@ export function apply(ctx, config) {
     name: 'bili_config',
     description: '读 / 改「刷B站」的设置。不给 `patch` 就是读；给了就改（只认 schema 里的字段）。\n'
       + '例：`{"perDay":5,"peakValley":true,"noon":true,"night":true,"autoComment":false,"transcribe":false,"keywords":["DeepSeek Harness"]}`；'
+      + '保底组：`{"guaranteeKeywords":["dsh 插件","DeepSeek"]}`（这一组每轮至少挑 1 条、最多 2 条，占 perDay 名额）。'
       + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）。'
       + 'QQ 转发：`{"qqBackend":"napcat-plugin","qqForwardUrl":"http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward","qqForwardToken":"...","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。'
       + 'OneBot：`{"qqBackend":"onebot","qqForwardUrl":"http://127.0.0.1:3000","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。'
@@ -1182,6 +1185,7 @@ export function apply(ctx, config) {
         ownerBlock,
         date: dayKey(),
         keywords: kws,
+        guaranteeKeywords: Array.isArray(cfg.guaranteeKeywords) ? cfg.guaranteeKeywords.filter(Boolean) : [],
         perDay: quota,
         already,
         left,
@@ -2016,7 +2020,7 @@ export function apply(ctx, config) {
       const patch = {}
       for (const k of ['perDay', 'peakValley', 'noon', 'night', 'autoComment', 'transcribe', 'asrModel',
         'commentPerRound', 'mentionName', 'dmMode', 'dmUid',
-        'keywords', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'stateDir', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
+        'keywords', 'guaranteeKeywords', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'stateDir', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
         if (k in body) patch[k] = body[k]
       }
       // ⭐ 范围钳制 + 两份都写（config.json / DSH 原生设置页），统一走 persistCfg —— 见文件上方

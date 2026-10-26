@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * scripts/prompt-smoke.mjs —— 提示词渲染的四条断言
+ * scripts/prompt-smoke.mjs —— 提示词渲染的断言（A–D 真模板前的骨架、E 真模板、F 保底组）
  * ============================================================================
  * 为什么必须有它（2026-10-25）：
  *   0.1.8 之前，`ownerDoc`（使用者工作区的 AGENTS.md）只在**非日报分支**被拼进提示词，
@@ -112,6 +112,50 @@ QQ：{{QQ_PATH}}
   else bad('E3: 「今日结论」没有语气要求（改 2 没落地）')
   if (out.includes('QQ 版第一段用设定里那个身份')) ok('E4: QQ 版有开场口吻要求')
   else bad('E4: QQ 版没有开场口吻要求（改 2 没落地）')
+}
+
+// F. 保底关键词组（2026-10-26）：perDay=5 + 14 个关键词时，某一类内容会被高频类目挤光
+//    ⇒ 模板里只放一个 {{GUARANTEE_BLOCK}} 占位，规则文本由 lib/prompt.mjs 生成，才能被这里断言住。
+{
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const realTpl = readFileSync(join(root, 'prompts', 'brief-prompt.txt'), 'utf8')
+
+  // F1 有保底组：规则文本必须出现，且组内词都要进提示词
+  const f1 = renderBriefPrompt({
+    ...base,
+    template: realTpl,
+    ownerBlock: '===== 设定 =====\n' + SENTINEL + '\n===== 结束 =====',
+    guaranteeKeywords: ['dsh 插件', 'DeepSeek'],
+    perDay: 6,
+    left: 6,
+  })
+  if (f1.includes('保底配额')) ok('F1a: 渲染出了保底配额规则')
+  else bad('F1a: 没有保底配额规则（{{GUARANTEE_BLOCK}} 没接上？）')
+  if (f1.includes('dsh 插件') && f1.includes('DeepSeek')) ok('F1b: 保底词组进了提示词')
+  else bad('F1b: 保底词组没进提示词')
+  if (!f1.includes('{{GUARANTEE_BLOCK}}')) ok('F1c: 占位符被替换了')
+  else bad('F1c: {{GUARANTEE_BLOCK}} 原样漏进了提示词')
+  if (f1.includes('至少挑 1 条') && f1.includes('最多挑 2 条')) ok('F1d: 保底条数是 1–2 条')
+  else bad('F1d: 保底条数写得不对（应该是至少 1、最多 2）')
+  if (f1.includes('- 分组：保底 / AIGC')) ok('F1e: 报告模板里保底条目有单独的分组行')
+  else bad('F1e: 报告模板里没有「- 分组：保底 / AIGC」这一行')
+
+  // F2 空保底组：给一句中性说明，不能留半截规则
+  const f2 = renderBriefPrompt({
+    ...base, template: realTpl, ownerBlock: '', guaranteeKeywords: [],
+  })
+  if (f2.includes('没有设保底关键词组')) ok('F2a: 空保底组给了中性说明')
+  else bad('F2a: 空保底组没给中性说明')
+  if (!f2.includes('保底配额')) ok('F2b: 空保底组不会渲染配额规则')
+  else bad('F2b: 空保底组却渲染了配额规则')
+
+  // F3 额度已用完（left = 0）：不许再要求「至少挑 1 条」—— 那会和硬上限直接打架
+  const f3 = renderBriefPrompt({
+    ...base, template: realTpl, ownerBlock: '', guaranteeKeywords: ['dsh 插件'],
+    perDay: 5, already: 5, left: 0,
+  })
+  if (f3.includes('名额已经用完了') && !f3.includes('至少挑')) ok('F3: 额度为 0 时保底组不硬要 1 条')
+  else bad('F3: 额度为 0 时还在要求「至少挑 1 条」')
 }
 
 console.log('')
