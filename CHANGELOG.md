@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.12
+
+### Fixed
+- **工具层说成功、宿主层说失败、配置被静默丢弃**（下游 2026-10-26 实测）：代码已经拉到磁盘、
+  但 GUI 进程里跑的还是旧版 schema 时，`bili_config` 存 `{ "perDay": 6, "guaranteeKeywords": [...] }` 会
+  写进 perDay、丢掉 guaranteeKeywords，却照样回 `ok: true`。现在：
+  - 顶层 `ok` 只在这批键**确实都生效**时为 true，否则 false + `warn` 写清原因
+  - 新增 `ignored`：这一版 schema 不认识的键**点名**列出来（HTTP 白名单外被丢掉的键也算进去）
+  - `duty.log` 同步记一行，不用再靠 diff `config.json` 才发现
+  - 不认识的键**不再发给宿主**：以前旧宿主会因为一个键把整批拒收，同一批里认识的键（`perDay`）也跟着白丢
+- `host` 从「有对象 / null」两种表示改成**四态**：`synced` / `rejected` / `skipped` / `not-written`；
+  只读调用以前回 `host: null`，现在回 `state: "not-written"` 并带 `hint`
+- 面板保存后按返回值里的 `warn` 显示，不再一律说「已保存」
+
+### Docs
+- `docs/TROUBLESHOOTING.md` 新增「工具回 ok: true、配置其实没生效」：原因、日志长什么样、怎么修
+- `docs/CONFIG.md` 补保存接口的返回字段（`ok` / `warn` / `ignored` / `host.state`）
+
+### Tests
+- `scripts/smoke-apply.mjs` 新增 [5/6] [6/6]：HTTP 与工具两条路在遇到未知键时都必须
+  `ok: false` + `ignored` 点名，同时认识的键照样生效、宿主那份照样同步；只读调用回 `not-written`
+
 ## 0.1.11
 
 ### Added

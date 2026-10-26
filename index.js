@@ -422,7 +422,10 @@ export function apply(ctx, config) {
   const saveCfgHost = async (patch) => {
     const hostPatch = { ...patch }
     delete hostPatch.githubToken
-    if (!Object.keys(hostPatch).length) return { ok: true, ns: null, skipped: 'secret-only' }
+    // ⭐ 2026-10-26：返回值改成**三态**（synced / rejected / skipped），不再用「有对象 / null」两种表示法
+    if (!Object.keys(hostPatch).length) {
+      return { ok: true, state: 'skipped', ns: null, reason: Object.keys(patch).length ? 'secret-only' : 'nothing-to-sync' }
+    }
     const attempt = async (fresh) => {
       const row = settingsDesc(fresh)
       if (!row?.ns || typeof ctx.settings?.update !== 'function') {
@@ -444,13 +447,13 @@ export function apply(ctx, config) {
       if (bad.length) throw Object.assign(new Error("写入没生效（读回来还是旧值）：" + bad.join(", ")), { stale: true })
       return row.ns
     }
-    try { return { ok: true, ns: await attempt(false) } }
+    try { return { ok: true, state: 'synced', ns: await attempt(false) } }
     catch (e) {
       if (!e?.noForm) {   // revision 过期 / 回读不一致 ⇒ 重取一次再写
-        try { return { ok: true, ns: await attempt(true), retried: true } } catch (e2) { e = e2 }
+        try { return { ok: true, state: 'synced', ns: await attempt(true), retried: true } } catch (e2) { e = e2 }
       }
       log(`写 DSH 设置失败：${e?.message ?? e}`)
-      return { ok: false, error: String(e?.message ?? e) }
+      return { ok: false, state: 'rejected', error: String(e?.message ?? e) }
     }
   }
   /**
@@ -460,8 +463,26 @@ export function apply(ctx, config) {
    */
   const persistCfg = async (patch) => {
     const clean = clampPatch(patch)
-    saveCfg(clean)
-    const host = await saveCfgHost(clean)
+    // ⭐ 2026-10-26（下游实测）：`bili_config` 回 ok:true、配置其实没生效 —— 现场是
+    //    「代码已拉到磁盘（0.1.11），但 GUI 进程里跑的还是 0.1.10 的 schema」这个窗口期：
+    //      · perDay 写进了 config.json（生效）
+    //      · guaranteeKeywords 被 normalize **静默丢掉**（DEFAULTS 里没这个键）
+    //      · 宿主那边整批拒收：Config field "guaranteeKeywords" is not volatile
+    //      · 工具照样回 ok:true ⇒ 用户只能靠 diff config.json 才发现 ✗
+    //    ⇒ 认识与否在这里分一次手：不认识的键**不再丢给宿主**（旧宿主会为一个键把整批拒收），
+    //      但必须点名说出来（warn / ignored / duty.log 三处都有）。
+    const known = {}
+    const ignored = []
+    for (const k of Object.keys(clean)) {
+      if (k in DEFAULTS) known[k] = clean[k]
+      else ignored.push(k)
+    }
+    if (ignored.length) {
+      log('⚠️ 这些设置键这一版不认识，已经丢掉了：' + ignored.join(', ')
+        + ' —— 最常见的原因是插件代码更新了、但 DSH 进程还在跑旧版（重启 DSH 再存一次就正常）')
+    }
+    saveCfg(known)
+    const host = await saveCfgHost(known)
     // 宿主写成功 ⇒ 恢复对账；失败 ⇒ 记成"本地优先"，别让界面把它们压回去
     // ⭐ 无条件本地优先（2026-10-18 第二次修）：
     //   三四位用户装了 0.1.9、界面没有"没同步"提示、开关照样弹回
@@ -469,9 +490,29 @@ export function apply(ctx, config) {
     //   （多半是 profile 层压过了 user 层）✗
     //   ⇒ 不再指望 DSH 那边：只要是从**插件面板**保存的键，读配置时一律以插件自己那份为准 ✓
     //   ⚠️ 代价：同名的项若在 DSH 原生设置页改，以插件面板为准（我们的设置页才是"正式的家"）。
-    markOverride(Object.keys(clean), true)
-    if (!host.ok) log('⚠️ 这几项没能同步到 DSH 原生设置，改为以插件自己的值为准：' + Object.keys(clean).join(', ') + '（' + host.error + '）')
-    return { clean, host }
+    markOverride(Object.keys(known), true)
+    if (!host.ok) log('⚠️ 这几项没能同步到 DSH 原生设置，改为以插件自己的值为准：' + Object.keys(known).join(', ') + '（' + host.error + '）')
+    return { clean: known, host, ignored }
+  }
+  /**
+   * ⭐ 把「这次到底有没有生效」说成人话，工具层 / HTTP 接口 / 面板三处共用（2026-10-26 加）。
+   *    host 是**三态**，`state` 就是那个状态，`ok` 只是它的布尔投影（null = 这次没写）：
+   *      · synced       宿主设置页那份也写进去了（最理想）
+   *      · rejected     本地 config.json 写了，宿主拒收（旧 schema 不认新键 / revision 过期 / 回读不一致）
+   *      · skipped      没有需要同步的键（只给了 githubToken，宿主持久化里不存 token；或者 patch 是空的）
+   *      · not-written  这次没给 patch（只读）—— **不是失败，也不是成功，就是没写**
+   *    ⚠️ 顶层 ok 只在「确实没完全生效」时为 false —— 以前恒 true，正是「工具说成功、配置被丢掉」那个 bug。
+   */
+  const syncReport = (host, ignored = []) => {
+    const warn = []
+    if (ignored.length) {
+      warn.push('这些设置键这一版不认识，已经被丢掉：' + ignored.join('、')
+        + '（多半是插件代码更新了、但 DSH 进程还在跑旧版 ⇒ 重启 DSH 再存一次）')
+    }
+    if (host?.state === 'rejected') {
+      warn.push('插件自己那份（config.json）已经写进去了，但没能同步到 DSH 原生设置页：' + host.error)
+    }
+    return { ok: !warn.length, warn: warn.join('\n'), ignored, host }
   }
 
   ensureHomeFiles(pluginDir, stateDir, log)
@@ -925,15 +966,19 @@ export function apply(ctx, config) {
       + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）。'
       + 'QQ 转发：`{"qqBackend":"napcat-plugin","qqForwardUrl":"http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward","qqForwardToken":"...","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。'
       + 'OneBot：`{"qqBackend":"onebot","qqForwardUrl":"http://127.0.0.1:3000","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。'
-      + '关闭：`{"qqBackend":"off"}`。',
+      + '关闭：`{"qqBackend":"off"}`。'
+      + '返回值：`ok:false` + `warn` 表示「没完全生效」（`ignored` 是这一版 schema 不认识的键，'
+      + '多半是代码已更新、DSH 进程还在跑旧版 ⇒ 重启再存一次）；`host.state` 四态：synced / rejected / skipped / not-written。',
     parameters: { patch: { type: 'object', additionalProperties: true, description: '要改的字段（可省）' } },
     async execute(args) {
-      let host = null
-      if (args?.patch && typeof args.patch === 'object' && !Array.isArray(args.patch)) {
-        // ⭐ 设置页显式设过的键以宿主为准 ⇒ 必须跟着写一份，否则"改了没反应"（钳范围也在这里）
-        host = (await persistCfg(args.patch)).host
-      }
-      return { ok: true, config: publicCfg(), windows: WINDOWS, home: stateDir, venvReady: venvReadyNow(), host }
+      // ⭐ 2026-10-26：以前这里恒回 ok:true（host 写在里面也不管），于是「配置被静默丢掉」看不出来
+      const hasPatch = Boolean(args?.patch && typeof args.patch === 'object' && !Array.isArray(args.patch))
+      // ⭐ 设置页显式设过的键以宿主为准 ⇒ 必须跟着写一份，否则"改了没反应"（钳范围也在这里）
+      const r = hasPatch
+        ? await persistCfg(args.patch)
+        : { host: { ok: null, state: 'not-written', hint: '这次没给 patch（只读），没有写任何设置' }, ignored: [] }
+      const sync = syncReport(r.host, r.ignored)
+      return { ...sync, config: publicCfg(), windows: WINDOWS, home: stateDir, venvReady: venvReadyNow() }
     },
   })
 
@@ -1897,7 +1942,7 @@ export function apply(ctx, config) {
           //    （已由 loadCfg 的 HOST_WINS_EXCLUDED 解决 ✓）；这里再把宿主的同步结果说清楚，
           //    免得以后再出现"日志说设好了、实际没生效" ✗
           const r = await persistCfg({ pythonPath: venvPy })
-          appendInstall(`已把 pythonPath 设为 ${venvPy}（DSH 那边${r?.host?.ok ? '已同步' : '没写成：' + (r?.host?.error || '未知原因')}）\n`)
+          appendInstall(`已把 pythonPath 设为 ${venvPy}（DSH 那边${r?.host?.state === 'synced' ? '已同步' : '没写成：' + (r?.host?.error || '未知原因')}）\n`)
         }
         {
           const miss = missingVenvDeps()
@@ -2018,19 +2063,29 @@ export function apply(ctx, config) {
     if (req.method === 'POST' && path === '/api/bili-duty/config') {
       const body = await readBody(req)
       const patch = {}
-      for (const k of ['perDay', 'peakValley', 'noon', 'night', 'autoComment', 'transcribe', 'asrModel',
+      // 2026-10-26：白名单外的键以前是静默丢掉的（传了也不吭声）⇒ 现在记下来一起报给调用方
+      const dropped = []
+      const CFG_PATCH_KEYS = ['perDay', 'peakValley', 'noon', 'night', 'autoComment', 'transcribe', 'asrModel',
         'commentPerRound', 'mentionName', 'dmMode', 'dmUid',
-        'keywords', 'guaranteeKeywords', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'stateDir', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']) {
+        'keywords', 'guaranteeKeywords', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'stateDir', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']
+      for (const k of CFG_PATCH_KEYS) {
         if (k in body) patch[k] = body[k]
       }
+      for (const k of Object.keys(body || {})) if (!CFG_PATCH_KEYS.includes(k)) dropped.push(k)
       // ⭐ 范围钳制 + 两份都写（config.json / DSH 原生设置页），统一走 persistCfg —— 见文件上方
       // ⭐ 私信那两个字段的合法值（2026-10-17 摘 PR #9；其余范围钳制统一在 persistCfg 里）
       if ('dmMode' in patch) patch.dmMode = ['off', 'only', 'both'].includes(String(patch.dmMode)) ? String(patch.dmMode) : 'off'
       if ('dmUid' in patch) patch.dmUid = Math.max(0, Math.min(Number(patch.dmUid) || 0, Number.MAX_SAFE_INTEGER))
-      const { clean, host } = await persistCfg(patch)
+      const { clean, host, ignored } = await persistCfg(patch)
+      const allIgnored = [...dropped, ...ignored]
       const safeClean = { ...clean, githubToken: clean.githubToken ? '[set]' : '', qqForwardToken: clean.qqForwardToken ? '[set]' : '' }
-      log(`设置已更新：${JSON.stringify(safeClean)}（DSH 那边${host.ok ? '已同步' : '没写成：' + host.error}）`)
-      return sendJson(res, 200, { ok: true, config: publicCfg(), host })
+      const hostText = host.state === 'synced' ? '已同步'
+        : host.state === 'skipped' ? '不用同步（没有需要写进设置页的键）'
+          : '没写成：' + host.error
+      log(`设置已更新：${JSON.stringify(safeClean)}（DSH 那边${hostText}）`
+        + (allIgnored.length ? `；丢弃了不认识的键：${allIgnored.join(', ')}` : ''))
+      const sync = syncReport(host, allIgnored)
+      return sendJson(res, 200, { ...sync, config: publicCfg() })
     }
 
     if (req.method === 'POST' && path === '/api/bili-duty/run') {

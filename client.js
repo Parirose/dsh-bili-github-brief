@@ -211,7 +211,10 @@ window.__ModuleLoader__.load({
           const r = await jpost('/config', p)
           if (r?.config) setSt((old) => ({ ...old, config: r.config }))
           // ⭐ DSH 原生设置页里显式设过的键由宿主说了算 ⇒ 我们这份也得写进去；写失败要说出来，别假装"已保存"
-          if (r?.host && r.host.ok === false) say(`${what || '设置'}：插件自己那份存了，但 DSH 设置页那份没写进去（${r.host.error}）`, 'warn')
+          // ⭐ 2026-10-26：改成认服务端的 ok / warn —— 以前只看 host.ok，于是「键被丢掉」这种情况
+          //    （代码更新了、DSH 进程还在跑旧版）会显示成「已保存」，而配置根本没进去 ✗
+          if (r?.warn) say(`${what || '设置'}：${r.warn}`, 'warn')
+          else if (r?.ok === false) say(`${what || '设置'}：没保存成（${r?.error || '未知原因'}）`, 'warn')
           else say(what ? `${what}：已保存` : '已保存', 'good')
         } catch (e) { say(String(e?.message ?? e), 'warn') }
         finally { setBusy('') }

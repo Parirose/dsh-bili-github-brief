@@ -6,6 +6,31 @@
 - 确认重启过 DSH
 - 查看 DSH 日志是否有插件加载错误
 
+## 工具回 ok: true、配置其实没生效
+
+症状：`bili_config`（或面板）显示保存成功，但 `config.json` 里只有一部分键，新键完全不在。
+
+原因：**代码已经拉到磁盘，但 DSH 进程里跑的还是旧版 schema**（进程启动时间早于 git pull / 升级）。
+旧版 `DEFAULTS` 不认识新键，落盘时被丢掉；旧版 schema 还会让宿主把整批 patch 拒收，例如：
+
+```text
+Config field "guaranteeKeywords" is not volatile
+```
+
+v0.1.12 起不再假装成功：
+
+- 返回值里 `ok: false` + `warn` 会写清原因，`ignored: ["guaranteeKeywords"]` 会点名是哪个键被丢；
+- `duty.log` 里也有一行「这些设置键这一版不认识，已经丢掉了：…」；
+- 不认识的键**不再发给宿主**，所以同一批里认识的键（`perDay` 之类）照样能同步成功。
+
+修法：重启 DSH（让它加载新代码），再存一次。
+
+顺带说明返回值的三个字段：
+
+- `ok`：只有「没完全生效」时才是 false（以前恒 true，就是这个坑）；
+- `host.state`：`synced`（宿主也写进去了）/ `rejected`（本地写了、宿主拒收）/ `skipped`（只有 token 这类不需要同步的键）/ `not-written`（这次只读，没写）；
+- `ignored`：这一版 schema 不认识的键。
+
 ## GitHub 403 / 限流
 
 - 确认 GitHub Token 有效

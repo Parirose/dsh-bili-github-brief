@@ -44,6 +44,8 @@
 
 > 数量对应：schema 里 37 个键，上表 37 行。新增键时请同步补行（`node scripts/audit-config.mjs` 会把“没文档化”也报出来）。
 >
+> 保存设置的返回值：`ok`（false = 没完全生效，别只看「已保存」）/ `warn`（原因）/ `ignored`（这一版 schema 不认识的键）/ `host.state`（synced / rejected / skipped / not-written）。
+>
 > 提示词模板：`prompts/brief-prompt.txt` 每次启动都会跟插件自带的那份对齐（`ensureHomeFiles`，内容不同就覆盖家目录那份）。
 > 想改规则就改仓库里那份再重新安装；改家目录里的副本，重启就会被打回去。
 
