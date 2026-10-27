@@ -55,6 +55,8 @@ window.__ModuleLoader__.load({
 [data-bd-grow]{flex:1;min-width:0;}
 [data-bd-label]{font-size:13px;}
 [data-bd-note]{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#9aa0a6);}
+[data-bd-domain]{display:flex;flex-direction:column;gap:6px;padding-left:8px;
+  border-left:2px solid var(--dsw-alias-border,rgba(128,128,128,.25));}
 [data-bd-sw]{flex:none;width:38px;height:22px;border-radius:11px;border:0;cursor:pointer;position:relative;
   background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.35));transition:background .15s;padding:0;}
 [data-bd-sw][data-on]{background:#3b82f6;}
@@ -143,8 +145,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState('')
       const [msg, setMsg] = React.useState('')
       const [msgTone, setMsgTone] = React.useState('')
-      const [kws, setKws] = React.useState(null)
-      const [gkw, setGkw] = React.useState(null)
+      const [doms, setDoms] = React.useState(null)   // 领域草稿：{ name, keywords(多行文本) }[]
       const [ws, setWs] = React.useState(null)
       const [rl, setRl] = React.useState(null)
       const [newVer, setNewVer] = React.useState('')       // 发现的新版本号（空 = 没发现）          // 日报形态：full / brief / off
@@ -179,8 +180,10 @@ window.__ModuleLoader__.load({
 
       const cfg = st?.config
       React.useEffect(() => {
-        if (cfg && kws === null) setKws((cfg.keywords || []).join('\n'))
-        if (cfg && gkw === null) setGkw((cfg.guaranteeKeywords || []).join('\n'))
+        if (cfg && doms === null) setDoms(((cfg.domains && cfg.domains.length) ? cfg.domains : []).map((d) => ({
+          name: String((d && d.name) || ''),
+          keywords: (Array.isArray(d && d.keywords) ? d.keywords : []).join('\n'),
+        })))
         if (cfg && ws === null) setWs(cfg.workspace || '')
         if (cfg && rl === null) setRl(cfg.reportLevel || 'full')
         if (cfg && perDay === null) setPerDay(String(cfg.perDay ?? 5))
@@ -366,9 +369,13 @@ window.__ModuleLoader__.load({
       }
 
       const onSaveText = async () => {
-        const list = String(kws || '').split('\n').map((s) => s.trim()).filter(Boolean)
-        const glist = String(gkw || '').split('\n').map((s) => s.trim()).filter(Boolean)
-        await patch({ keywords: list, guaranteeKeywords: glist, workspace: String(ws || '').trim() }, '关键词与工作区')
+        // 关键词规则沿用老口径：**一行一个，不按逗号拆**（历史上逗号会把两条词粘成一条）
+        const payload = (doms || []).map((d) => ({
+          name: String(d.name || '').trim(),
+          keywords: String(d.keywords || '').split('\n').map((s) => s.trim()).filter(Boolean),
+        }))
+        // 保存时把旧字段一起清空 —— 否则下次读配置又会被迁移逻辑当成「有旧关键词」
+        await patch({ domains: payload, keywords: [], guaranteeKeywords: [], workspace: String(ws || '').trim() }, '领域与关键词')
       }
 
       if (!cfg) {
@@ -382,6 +389,9 @@ window.__ModuleLoader__.load({
       }
 
       const sw = (k) => Boolean(cfg[k])
+      // ⭐ 0.2.0：领域数上限就是 perDay（每个领域每轮至少占 1 条名额，多了会互相打架）
+      const perDayNum = Math.max(0, Number(perDay ?? cfg.perDay ?? 5) || 0)
+      const domainCount = (doms || []).filter((d) => String(d.keywords || '').split('\n').some((s) => s.trim())).length
       // ⭐ 2026-10-25：日报模式与峰谷模式的调度是**互斥**的（见 index.js 的 tick）：
       //    brief 分支只看 scheduleEnabled/scheduleTime；非 brief 分支只看 peakValley/noon/night。
       //    面板上两段都渲染会让人以为那个开关管用 ⇒ 按模式置灰 + 文案说实话。
@@ -395,6 +405,8 @@ window.__ModuleLoader__.load({
           h('span', { 'data-bd-badge': '' }, '环境' + (st.venvReady ? '已就绪' : (st.installing ? '正在装' : '未装'))),
           h('span', { 'data-bd-badge': '' }, st.loggedIn ? 'B站已登录' : 'B站未登录'),
             h('span', { 'data-bd-badge': '' }, 'v' + (st.version || '?')),
+            domainCount > Math.max(0, perDayNum - Number(st.pickedToday ?? st.ranToday ?? 0))
+              ? h('span', { 'data-bd-note': '' }, '本轮额度不足，后面的领域这轮拿不到保底位') : null,
           h('div', { 'data-bd-grow': '' }),
           h('button', { 'data-bd-btn': '', disabled: busy === 'run', onClick: onRun }, '现在跑一轮')),
           runNote ? h('div', { 'data-bd-msg': '', 'data-good': runNote.tone === 'good' ? '' : undefined,
@@ -652,19 +664,34 @@ window.__ModuleLoader__.load({
         /* ── 关注什么 / 在哪儿刷 ── */
         h('div', { 'data-bd-sec': '' },
           h('div', { 'data-bd-h': '' }, '关注什么'),
-          h('textarea', {
-            'data-bd-input': '', rows: 5, placeholder: '一行一个关键词；留空用内置那几组',
-            value: kws ?? '', onChange: (e) => setKws(e.target.value),
-          }),
-          h('div', { 'data-bd-label': '' }, '保底关键词（一行一个，每轮至少挑 1 条）'),
-          h('textarea', {
-            'data-bd-input': '', rows: 3, placeholder: 'dsh 插件\nDeepSeek',
-            value: gkw ?? '', onChange: (e) => setGkw(e.target.value),
-          }),
+          (doms || []).map((d, i) => h('div', { 'data-bd-domain': '', key: 'dom-' + i },
+            h('div', { 'data-bd-row': '' },
+              h('input', {
+                'data-bd-input': '', value: d.name ?? '',
+                placeholder: '领域名（留空 = 领域 ' + (i + 1) + '）',
+                onChange: (e) => setDoms((old) => old.map((x, j) => (j === i ? { ...x, name: e.target.value } : x))),
+              }),
+              h('button', {
+                'data-bd-btn': '', disabled: Boolean(busy),
+                onClick: () => setDoms((old) => old.filter((_, j) => j !== i)),
+              }, '删除')),
+            h('textarea', {
+              'data-bd-input': '', rows: 2, placeholder: '一行一个关键词（不按逗号拆）',
+              value: d.keywords ?? '',
+              onChange: (e) => setDoms((old) => old.map((x, j) => (j === i ? { ...x, keywords: e.target.value } : x))),
+            }),
+            h('div', { 'data-bd-note': '' }, '这个领域每轮至少占 1 条名额'))),
+          h('div', { 'data-bd-row': '' },
+            h('button', {
+              'data-bd-btn': '',
+              disabled: Boolean(busy) || domainCount >= perDayNum,
+              onClick: () => setDoms((old) => [...(old || []), { name: '', keywords: '' }]),
+            }, '+ 新增领域'),
+            h('div', { 'data-bd-note': '' }, '每天最多挑 ' + perDayNum + ' 条 ⇒ 最多 ' + perDayNum + ' 个领域')),
           h('div', { 'data-bd-note': '' },
-            '这一组每轮至少进 1 条、最多 2 条，占「每天最多挑几条」的名额（不是额外加量）；留空 = 不启用。',
+            '一条内容同时命中多个领域时，只算它排在最前面的那个领域（归属唯一）。',
             h('br'),
-            '用途：某一类内容（比如 dsh 插件）总被别的类挤光时，给它留个保底位。一条都不达标就在「数据缺口」里说明，不拿低质内容凑数。'),
+            '某个领域这一轮一条合格的都没有 ⇒ 名额回流给其他领域，并在「数据缺口」里写明，不拿低质内容凑数。'),
           h('div', { 'data-bd-label': '' }, '工作区（它按这里的 AGENTS.md 认设定）'),
           h('input', {
             'data-bd-input': '', value: ws ?? '',

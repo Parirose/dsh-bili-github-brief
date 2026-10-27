@@ -4,7 +4,7 @@
 
 | 字段 | 默认 | 说明（作用 / 什么时候别动）|
 |---|---|---|
-| `perDay` | 5 | 每天最多挑几条（B站与 GitHub 各自硬上限）。别动：想要更多内容就调大，但超过 10 条日报会很长、QQ 会分更多段。设了 `guaranteeKeywords` 时建议至少 5，否则保底组会把 AIGC 内容挤掉。 |
+| `perDay` | 5 | 每天最多挑几条（B站与 GitHub 各自硬上限）。别动：想要更多内容就调大，但超过 10 条日报会很长、QQ 会分更多段。设了领域（`domains`）时建议至少 5：每个领域每轮至少占 1 条名额，`perDay` 太小会让后面的领域拿不到保底位。 |
 | `peakValley` | false | 峰谷时段自动刷总开关。**只对非日报模式生效**（日报模式看 `scheduleEnabled` / `scheduleTime`）。 |
 | `noon` | true | 峰谷子开关：中午窗口（12:00–14:00）。仅 `peakValley` 为 true 且非日报模式时生效。 |
 | `night` | true | 峰谷子开关：晚间 / 夜间窗口（18:00 之后到 09:00）。同上。 |
@@ -13,8 +13,9 @@
 | `commentPerRound` | 1 | 每轮最多发几条评论（0–20，0 = 不发）。范围由 `clampPatch` 在读写两头钳。 |
 | `replyToComments` | false | 回复“直接回复在你那条评论下面的人”（楼中楼）。**会对外发东西**。 |
 | `replyPerRound` | 1 | 每轮最多回几条（1–10）。仅 `replyToComments` 开着时生效。 |
-| `keywords` | 空 | 固定关键词，一行一个；留空用章程里默认那几组。 |
-| `guaranteeKeywords` | 空 | 保底关键词组：这一组每轮至少挑 1 条、最多 2 条，**占 `perDay` 名额**（不是额外加量）。用来防止某一类内容被其他类挤光；空数组 = 不启用。确实一条合格的都没有时，报告会在「数据缺口」里写明原因，不会拿低质内容凑数。 |
+| `domains` | 空 | **领域列表**（0.2.0 起的主入口）：`[{ "name": "AIGC", "keywords": ["ComfyUI", "LoRA"] }]`。每个有效领域（`keywords` 非空）**每轮至少挑 1 条**，占 `perDay` 名额（不是额外加量）；有效领域数不能超过 `perDay`，超了保存时只留前几个并 `warn`。一条内容同时命中多个领域时**只算第一个**（按数组顺序）。某个领域确实一条合格的都没有时，报告在「数据缺口」里写明，不拿低质内容凑数。列表在面板里编辑（增 / 删 / 改），不用手写 JSON。 |
+| `keywords` | 空 | 旧字段（0.1.x）：固定关键词，一行一个。现在只在 `domains` 为空时作为搜索词，且读配置时会被**迁移**成 `{ name: "默认" }` 领域（只读迁移，不写文件）。 |
+| `guaranteeKeywords` | 空 | 旧字段（0.1.11）：保底组。现在等价于一个叫「保底」的领域，同样只在 `domains` 为空时参与迁移。 |
 | `dmMode` | off | B站私信：`off` / `only` / `both`。`qqBackend` 不是 `off` 时**本项被忽略**。 |
 | `dmUid` | 0 | 私信收件人的 B站 UID（数字）。`dmMode` 不是 off 且它 > 0 才真发。 |
 | `qqBackend` | off | QQ 投递后端：`off` / `napcat-plugin` / `onebot`。老配置只有 `qqForwardUrl` 且没写过本项时自动按 `napcat-plugin`。 |
@@ -42,9 +43,11 @@
 | `workspace` | 空 | 工作区路径；会读这里的 `AGENTS.md` 当作人设（日报模式也生效，仅影响语气 / 称呼）。 |
 | `reportLevel` | full | 报告详细程度：`full` / `brief` / `off`。 |
 
-> 数量对应：schema 里 37 个键，上表 37 行。新增键时请同步补行（`node scripts/audit-config.mjs` 会把“没文档化”也报出来）。
+> 数量对应：schema 里 38 个键，上表 38 行。新增键时请同步补行（`node scripts/audit-config.mjs` 会把“没文档化”也报出来）。
 >
 > 保存设置的返回值：`ok`（false = 没完全生效，别只看「已保存」）/ `warn`（原因）/ `ignored`（这一版 schema 不认识的键）/ `host.state`（synced / rejected / skipped / not-written）。
+>
+> 领域规则：提示词里那段配额条款由 `lib/prompt.mjs` 的 `renderDomainBlock()` 生成，模板里只有一个 `{{DOMAIN_BLOCK}}`（老模板的 `{{GUARANTEE_BLOCK}}` 也照样填，内容相同）。四个分支——没有领域 / 额度已满 / 额度不足 / 正常——都有单测。
 >
 > 提示词模板：`prompts/brief-prompt.txt` 每次启动都会跟插件自带的那份对齐（`ensureHomeFiles`，内容不同就覆盖家目录那份）。
 > 想改规则就改仓库里那份再重新安装；改家目录里的副本，重启就会被打回去。

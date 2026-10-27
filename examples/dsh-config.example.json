@@ -12,18 +12,30 @@
   "qqBackend": "napcat-plugin",
   "qqGroupIds": "",
   "qqPrivateIds": "",
-  "keywords": [
-    "ComfyUI",
-    "ComfyUI 工作流",
-    "AIGC",
-    "Krea2",
-    "Minimax-H3",
-    "LoRA",
-    "生图",
-    "生视频"
-  ],
   "perDay": 10,
   "transcribe": true,
   "asrModel": "small",
-  "reportLevel": "full"
+  "reportLevel": "full",
+  "domains": [
+    {
+      "name": "AIGC",
+      "keywords": [
+        "ComfyUI",
+        "ComfyUI 工作流",
+        "AIGC",
+        "Krea2",
+        "Minimax-H3",
+        "LoRA",
+        "生图",
+        "生视频"
+      ]
+    },
+    {
+      "name": "dsh 插件",
+      "keywords": [
+        "dsh 插件",
+        "DeepSeek Harness"
+      ]
+    }
+  ]
 }

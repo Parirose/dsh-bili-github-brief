@@ -15,9 +15,11 @@
  *       node scripts/audit-config.mjs --strict   → 有 ⚠️ 就退出码 1
  * ============================================================================
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { lintDomains } from '../lib/domains.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (p) => readFileSync(join(root, p), 'utf8')
@@ -65,11 +67,16 @@ for (const { key, line } of schemaLines) {
 /* ── b) 提示词占位符 ↔ fill ── */
 const tplKeys = new Set([...tplSrc.matchAll(/\{\{([A-Z_][A-Z0-9_]*)\}\}/g)].map((m) => m[1]))
 const fills = new Set()
+/* 老模板的手改残留：0.2.0 把 {{GUARANTEE_BLOCK}} 改名成 {{DOMAIN_BLOCK}}，
+ * 但渲染器两个都填（内容相同）⇒ 填了 GUARANTEE_BLOCK 而模板里没有，不算死代码 */
+const FILL_ALIASES = new Set(['GUARANTEE_BLOCK'])
 for (const src of [indexSrc, promptSrc]) {
   for (const m of src.matchAll(/fill(?:In)?\(\s*[^,]+,\s*'([A-Z_][A-Z0-9_]*)'/g)) fills.add(m[1])
 }
 for (const k of tplKeys) if (!fills.has(k)) warn(`模板里有 {{${k}}}，但没有对应的 fill('${k}') ⇒ 会原样漏到提示词里`)
-for (const k of fills) if (!tplKeys.has(k)) warn(`有 fill('${k}')，但模板里没有 {{${k}}} ⇒ 死代码`)
+for (const k of fills) {
+  if (!tplKeys.has(k) && !FILL_ALIASES.has(k)) warn(`有 fill('${k}')，但模板里没有 {{${k}}} ⇒ 死代码`)
+}
 
 /* ── c) client 调用 → index 路由 ── */
 const apiBase = (/const\s+API\s*=\s*'([^']+)'/.exec(clientSrc) || [])[1] || ''
@@ -89,11 +96,33 @@ for (const bad of ['只做了 Windows', '只支持 Windows', '仅 Windows 可用
   if (indexSrc.includes(bad)) warn(`index.js 里出现了\u201c${bad}\u201d—— 说明又有按钮只对一个平台生效（请补齐 darwin/linux）`)
 }
 
+/* ── G) 领域体检（0.2.0）：domains 与 perDay 打架、空名、跨领域重复词 ──
+ * 拿两份配置跑：始终检查随包发的 examples/dsh-config.example.json（CI 里也有），
+ * 再加本机真实配置（有的话）—— CI 的结论稳定，本机又能提前看到自己的问题。 */
+const cfgFiles = [join(root, 'examples', 'dsh-config.example.json')]
+const realCfg = process.env.DSH_HOME
+  ? join(process.env.DSH_HOME, 'bili-duty', 'config.json')
+  : join(homedir(), '.dsh', 'bili-duty', 'config.json')
+if (existsSync(realCfg)) cfgFiles.push(realCfg)
+let domainChecked = 0
+for (const f of cfgFiles) {
+  try {
+    const c = JSON.parse(readFileSync(f, 'utf8'))
+    if (!c || typeof c !== 'object') continue
+    domainChecked += 1
+    const tag = f === cfgFiles[0] ? '示例配置' : '本机配置'
+    for (const m of lintDomains(c.domains, c.perDay)) warn(`[${tag}] ${m}`)
+  } catch (e) {
+    if (f === cfgFiles[0]) warn('示例配置读不了：' + (e?.message ?? e))
+  }
+}
+
 /* ── 汇总 ── */
 console.log(`schema 键   : ${schemaKeys.length}`)
 console.log(`消费点覆盖 : ${schemaKeys.filter((k) => consumed.has(k)).length}/${schemaKeys.length}`)
 console.log(`模板占位符 : ${tplKeys.size}，fill：${fills.size}`)
 console.log(`client 路径  : ${clientPaths.size}，index 路由：${routes.size}`)
+console.log(`领域体检    : ${domainChecked} 份配置`)
 console.log('')
 if (!warns.length) {
   console.log('结果：0 条 ⚠️')

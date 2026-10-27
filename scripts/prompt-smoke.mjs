@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * scripts/prompt-smoke.mjs —— 提示词渲染的断言（A–D 真模板前的骨架、E 真模板、F 保底组）
+ * scripts/prompt-smoke.mjs —— 提示词渲染的断言（A–D 真模板前的骨架、E 真模板、F 领域配额）
  * ============================================================================
  * 为什么必须有它（2026-10-25）：
  *   0.1.8 之前，`ownerDoc`（使用者工作区的 AGENTS.md）只在**非日报分支**被拼进提示词，
@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderBriefPrompt } from '../lib/prompt.mjs'
+import { migrateLegacyDomains, normalizeDomains } from '../lib/domains.mjs'
 
 const SENTINEL = 'ATRI_SENTINEL_9f3'
 let failed = 0
@@ -114,48 +115,80 @@ QQ：{{QQ_PATH}}
   else bad('E4: QQ 版没有开场口吻要求（改 2 没落地）')
 }
 
-// F. 保底关键词组（2026-10-26）：perDay=5 + 14 个关键词时，某一类内容会被高频类目挤光
-//    ⇒ 模板里只放一个 {{GUARANTEE_BLOCK}} 占位，规则文本由 lib/prompt.mjs 生成，才能被这里断言住。
+// F. 领域配额（0.2.0）：把 0.1.11 的「保底组」换成开放集合
+//    起因同保底组：perDay=5 + 14 个关键词时，某一类内容会被高频类目挤光。
+//    保底组只能救一类；领域是开放集合，加一个领域不用改代码。
 {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..')
   const realTpl = readFileSync(join(root, 'prompts', 'brief-prompt.txt'), 'utf8')
+  const two = [
+    { name: 'AIGC', keywords: ['ComfyUI', 'LoRA'] },
+    { name: 'dsh 插件', keywords: ['dsh 插件', 'DSH Harness'] },
+  ]
+  const render = (extra) => renderBriefPrompt({ ...base, template: realTpl, ownerBlock: '', ...extra })
 
-  // F1 有保底组：规则文本必须出现，且组内词都要进提示词
-  const f1 = renderBriefPrompt({
-    ...base,
-    template: realTpl,
-    ownerBlock: '===== 设定 =====\n' + SENTINEL + '\n===== 结束 =====',
-    guaranteeKeywords: ['dsh 插件', 'DeepSeek'],
-    perDay: 6,
-    left: 6,
-  })
-  if (f1.includes('保底配额')) ok('F1a: 渲染出了保底配额规则')
-  else bad('F1a: 没有保底配额规则（{{GUARANTEE_BLOCK}} 没接上？）')
-  if (f1.includes('dsh 插件') && f1.includes('DeepSeek')) ok('F1b: 保底词组进了提示词')
-  else bad('F1b: 保底词组没进提示词')
-  if (!f1.includes('{{GUARANTEE_BLOCK}}')) ok('F1c: 占位符被替换了')
-  else bad('F1c: {{GUARANTEE_BLOCK}} 原样漏进了提示词')
-  if (f1.includes('至少挑 1 条') && f1.includes('最多挑 2 条')) ok('F1d: 保底条数是 1–2 条')
-  else bad('F1d: 保底条数写得不对（应该是至少 1、最多 2）')
-  if (f1.includes('- 分组：保底 / AIGC')) ok('F1e: 报告模板里保底条目有单独的分组行')
-  else bad('F1e: 报告模板里没有「- 分组：保底 / AIGC」这一行')
+  // F1 无有效领域 ⇒ 一句中性说明，不能留半截配额规则
+  const f1 = render({ domains: [] })
+  if (f1.includes('没有分领域')) ok('F1a: 无领域给了中性说明')
+  else bad('F1a: 无领域没给中性说明')
+  if (!f1.includes('领域配额')) ok('F1b: 无领域不会渲染配额规则')
+  else bad('F1b: 无领域却渲染了配额规则')
 
-  // F2 空保底组：给一句中性说明，不能留半截规则
-  const f2 = renderBriefPrompt({
-    ...base, template: realTpl, ownerBlock: '', guaranteeKeywords: [],
-  })
-  if (f2.includes('没有设保底关键词组')) ok('F2a: 空保底组给了中性说明')
-  else bad('F2a: 空保底组没给中性说明')
-  if (!f2.includes('保底配额')) ok('F2b: 空保底组不会渲染配额规则')
-  else bad('F2b: 空保底组却渲染了配额规则')
+  // F2 额度已满（left = 0）⇒ 不许再说「至少挑 1 条」（那会和硬上限打架）
+  const f2 = render({ domains: two, perDay: 5, already: 5, left: 0 })
+  if (f2.includes('名额已经用完了') && !f2.includes('至少挑')) ok('F2: 额度为 0 时不再硬要 1 条')
+  else bad('F2: 额度为 0 时还在要求「至少挑 1 条」')
 
-  // F3 额度已用完（left = 0）：不许再要求「至少挑 1 条」—— 那会和硬上限直接打架
-  const f3 = renderBriefPrompt({
-    ...base, template: realTpl, ownerBlock: '', guaranteeKeywords: ['dsh 插件'],
-    perDay: 5, already: 5, left: 0,
-  })
-  if (f3.includes('名额已经用完了') && !f3.includes('至少挑')) ok('F3: 额度为 0 时保底组不硬要 1 条')
-  else bad('F3: 额度为 0 时还在要求「至少挑 1 条」')
+  // F3 0 < left < N ⇒ 前 left 个领域各 1 条，其余写缺口
+  const f3 = render({ domains: two, perDay: 5, already: 4, left: 1 })
+  if (f3.includes('只剩 1 个 B站 名额') && f3.includes('前 1 个领域各挑 1 条')) ok('F3a: 额度不足时按顺序保前 1 个领域')
+  else bad('F3a: 额度不足的分支文案不对')
+  if (f3.includes('额度不足未挑')) ok('F3b: 提醒把没挑到的领域写进数据缺口')
+  else bad('F3b: 没提醒写数据缺口')
+  if (f3.includes('AIGC') && f3.includes('ComfyUI') && f3.includes('dsh 插件') && f3.includes('DSH Harness')) ok('F3c: 领域名与关键词原文都在提示词里')
+  else bad('F3c: 领域名 / 关键词丢了')
+
+  // F4 left >= N ⇒ 完整规则
+  const f4 = render({ domains: two, perDay: 5, already: 0, left: 5 })
+  if (f4.includes('共 2 个有效领域') && f4.includes('每个领域本轮至少挑 1 条')) ok('F4a: 完整规则渲染出来了')
+  else bad('F4a: 完整规则没渲染出来')
+  if (f4.includes('1. 「AIGC」：ComfyUI、LoRA') && f4.includes('2. 「dsh 插件」：dsh 插件、DSH Harness')) ok('F4b: 领域清单逐条列出（名 + 词）')
+  else bad('F4b: 领域清单不对')
+  if (f4.includes('归属唯一') && f4.includes('名额回流')) ok('F4c: 归属唯一 + 空缺回流都写了')
+  else bad('F4c: 缺「归属唯一」或「名额回流」')
+  if (f4.includes('- 分组：<领域名>') && !f4.includes('分组：保底 / AIGC')) ok('F4d: 报告模板改成了「- 分组：<领域名>」')
+  else bad('F4d: 报告模板的分组行没改干净')
+  if (f4.includes('[<领域名>] ')) ok('F4e: QQ 版按领域加前缀')
+  else bad('F4e: QQ 版没写领域前缀')
+
+  // F5 老模板里的 {{GUARANTEE_BLOCK}} 与新 {{DOMAIN_BLOCK}} 填出来必须一字不差
+  const o5 = renderBriefPrompt({
+    ...base, ownerBlock: '', domains: two,
+    template: '<<D>>{{DOMAIN_BLOCK}}<<G>>{{GUARANTEE_BLOCK}}<<END>>',
+  }).trim()
+  const d1 = o5.slice(o5.indexOf('<<D>>') + 5, o5.indexOf('<<G>>'))
+  const d2 = o5.slice(o5.indexOf('<<G>>') + 5, o5.indexOf('<<END>>'))
+  if (d1 && d1 === d2) ok('F5: DOMAIN_BLOCK 与 GUARANTEE_BLOCK 内容相同（老模板不会漏规则）')
+  else bad('F5: 两个占位符填出来的内容不一致')
+
+  // F6 迁移 + clamp（纯函数，见 lib/domains.mjs）
+  const mig = migrateLegacyDomains({ keywords: ['ComfyUI'], guaranteeKeywords: ['dsh 插件'] })
+  if (mig.migrated && mig.domains.length === 2 && mig.domains[0].name === '默认' && mig.domains[1].name === '保底') ok('F6a: 旧 keywords/guaranteeKeywords 迁移成「默认」「保底」两个领域')
+  else bad('F6a: 迁移结果不对：' + JSON.stringify(mig))
+
+  const notes = []
+  const six = Array.from({ length: 6 }, (_, i) => ({ name: 'D' + i, keywords: ['k' + i] }))
+  const clamped = normalizeDomains(six, 5, notes)
+  if (clamped.length === 5 && notes.length === 1 && notes[0].includes('只保留前 5 个')) ok('F6b: 6 个领域 + perDay 5 ⇒ 截成 5 个并留一条 note')
+  else bad('F6b: clamp 不对：' + clamped.length + ' / ' + JSON.stringify(notes))
+
+  const mixed = normalizeDomains([{ name: 'a', keywords: [] }, { name: 'b', keywords: ['x'] }], 1, [])
+  if (mixed.length === 2) ok('F6c: 关键词为空的领域不占名额（不会被当成 2 个领域截掉）')
+  else bad('F6c: 空领域被算进了配额')
+
+  const dup = normalizeDomains([{ name: 'a', keywords: [' x ', 'x', '', 42] }], 0, [])
+  if (dup.length === 1 && dup[0].keywords.length === 1 && dup[0].keywords[0] === 'x') ok('F6d: 关键词 trim / 去重 / 去非字符串')
+  else bad('F6d: 关键词清洗不对：' + JSON.stringify(dup))
 }
 
 console.log('')

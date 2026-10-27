@@ -109,7 +109,7 @@ const why = (e) => (e && e.code ? e.code + '：' : '') + (e && e.message ? e.mes
 console.log('plugin root : ' + root)
 console.log('')
 
-console.log('[1/6] 冷启动（Settings 服务未就绪，row = null）')
+console.log('[1/7] 冷启动（Settings 服务未就绪，row = null）')
 try {
   const { tools, routes, st } = await runOnce('cold')
   if (routes.length === 1) ok('/api/bili-duty 路由挂上了')
@@ -123,21 +123,21 @@ try {
   console.log(String(e && e.stack ? e.stack : '').split('\n').slice(1, 4).join('\n'))
 }
 
-console.log('[2/6] 老配置兼容（只有 qqForwardUrl）')
+console.log('[2/7] 老配置兼容（只有 qqForwardUrl）')
 try {
   const { st } = await runOnce('legacy', { config: { qqForwardUrl: 'http://127.0.0.1:6099/plugin/x/api/forward' } })
   if (st && st.config && st.config.qqBackend === 'napcat-plugin') ok('自动按 napcat-plugin 处理')
   else bad('qqBackend = ' + (st && st.config ? st.config.qqBackend : '?') + '（应为 napcat-plugin）')
 } catch (e) { bad('apply() 真崩了（' + why(e) + '）') }
 
-console.log('[3/6] 用户显式选 off 不被改回')
+console.log('[3/7] 用户显式选 off 不被改回')
 try {
   const { st } = await runOnce('off', { config: { qqForwardUrl: 'http://127.0.0.1:6099/plugin/x/api/forward', qqBackend: 'off' } })
   if (st && st.config && st.config.qqBackend === 'off') ok('保持 off')
   else bad('qqBackend = ' + (st && st.config ? st.config.qqBackend : '?') + '（应为 off）')
 } catch (e) { bad('apply() 真崩了（' + why(e) + '）') }
 
-console.log('[4/6] Settings 服务已就绪（有 row）')
+console.log('[4/7] Settings 服务已就绪（有 row）')
 try {
   const row = { ns: 'bili-scroll', revision: 1, value: { perDay: 5, mentionName: '', replyToComments: false, overlayMcp: true }, user: {} }
   const { routes, st } = await runOnce('row', { row })
@@ -145,7 +145,7 @@ try {
   else bad('有 row 时路由/状态异常')
 } catch (e) { bad('apply() 真崩了（' + why(e) + '）') }
 
-console.log('[5/6] 未知的设置键：必须说出来，不能假装成功')
+console.log('[5/7] 未知的设置键：必须说出来，不能假装成功')
 try {
   // ⭐ 2026-10-26 复现场景：代码已更新、进程还在跑旧 schema ⇒ 新键不认识
   const row = { ns: 'bili-scroll', revision: 1, value: { perDay: 5, mentionName: '', replyToComments: false, overlayMcp: true }, user: {} }
@@ -168,7 +168,7 @@ try {
   })
 } catch (e) { bad('未知键这条路崩了（' + why(e) + '）') }
 
-console.log('[6/6] bili_config 工具的 ok 跟着真相走')
+console.log('[6/7] bili_config 工具的 ok 跟着真相走')
 try {
   const row = { ns: 'bili-scroll', revision: 1, value: { perDay: 5, mentionName: '', replyToComments: false, overlayMcp: true }, user: {} }
   await runOnce('tool', {
@@ -193,6 +193,43 @@ try {
     },
   })
 } catch (e) { bad('工具这条路崩了（' + why(e) + '）') }
+
+console.log('[7/7] 领域（0.2.0）：domains 落盘 + 旧字段清空 + 超 perDay 截断')
+try {
+  const row = { ns: 'bili-scroll', revision: 1, value: { perDay: 5, mentionName: '', replyToComments: false, overlayMcp: true }, user: {} }
+  await runOnce('domains', {
+    row,
+    config: { perDay: 5, keywords: ['旧词'], guaranteeKeywords: ['旧保底'], _set: ['keywords', 'guaranteeKeywords'] },
+    probe: async ({ routes }) => {
+      const r = await post(routes, {
+        domains: [
+          { name: 'AIGC', keywords: [' ComfyUI ', 'ComfyUI', 'LoRA'] },
+          { name: 'dsh 插件', keywords: ['dsh 插件'] },
+          { name: '', keywords: ['DSH Harness'] },
+        ],
+        keywords: [],
+        guaranteeKeywords: [],
+      })
+      if (r?.config?.domains?.length === 3) ok('domains 写进配置了（3 个）')
+      else bad('domains 没写进去：' + JSON.stringify(r?.config?.domains) + ' / warn=' + JSON.stringify(r?.warn))
+      if (r?.config?.domains?.[0]?.keywords?.length === 2) ok('关键词 trim + 去重（ComfyUI 只留一个）')
+      else bad('关键词没清洗：' + JSON.stringify(r?.config?.domains?.[0]))
+      if (r?.config?.domains?.[2]?.name === '') ok('空领域名原样存着（显示时兜底成「领域 3」）')
+      else bad('空领域名被改坏了：' + JSON.stringify(r?.config?.domains?.[2]))
+      if ((r?.config?.keywords || []).length === 0 && (r?.config?.guaranteeKeywords || []).length === 0) ok('旧字段 keywords / guaranteeKeywords 被清空')
+      else bad('旧字段没清空：' + JSON.stringify({ k: r?.config?.keywords, g: r?.config?.guaranteeKeywords }))
+
+      const six = Array.from({ length: 6 }, (_, i) => ({ name: 'D' + i, keywords: ['k' + i] }))
+      const over = await post(routes, { perDay: 2, domains: six })
+      if (over?.config?.domains?.length === 2) ok('6 个领域 + perDay 2 ⇒ 只留 2 个')
+      else bad('超 perDay 没截断：' + JSON.stringify(over?.config?.domains?.map((d) => d.name)))
+      if (String(over?.warn || '').includes('只保留前 2 个')) ok('截断原因写进 warn 了')
+      else bad('截断没写进 warn：' + JSON.stringify(over?.warn))
+      if (over?.ok === false) ok('有截断时 ok:false（不假装完全成功）')
+      else bad('截断却回 ok:true')
+    },
+  })
+} catch (e) { bad('领域这条路崩了（' + why(e) + '）') }
 
 console.log('')
 if (failed) {

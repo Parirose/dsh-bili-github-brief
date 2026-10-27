@@ -15,6 +15,7 @@
  * ============================================================================
  */
 import { loadHostDeps } from './lib/hostdeps.mjs'
+import { activeDomains, migrateLegacyDomains, normalizeDomains } from './lib/domains.mjs'
 
 // ⭐ 这两样从**宿主那棵树**里取（拿不到就退到自己的依赖；再拿不到，defineTool 用本地等价实现）。
 //    起因（2026-10-16 用户递来的完整报告 + 本机复现）：它们是 optional peer，
@@ -93,6 +94,8 @@ export const Config = !z ? undefined : z.object({
   keywords: z.array(z.string()).default([]).extra('volatile', true),
   /** 保底关键词组：这一组每轮至少挑 1 条、最多 2 条（解决某类内容被别的类挤光）；占 perDay 名额，不额外加量 */
   guaranteeKeywords: z.array(z.string()).default([]).extra('volatile', true),
+  /** 领域列表：每个领域每轮至少 1 条；一条内容只算它命中的第一个领域 */
+  domains: z.array(z.object({ name: z.string().default(''), keywords: z.array(z.string()).default([]) })).default([]).extra('volatile', true),
   /** Python：指向 venv 里的那个最好 */
   pythonPath: z.string().default('python').extra('volatile', true),
   /** dsh 的 bin.js（不填就试自动探测，再退化成 shell 里的 dsh） */
@@ -241,13 +244,14 @@ export function apply(ctx, config) {
   const DEFAULTS = {
     perDay: 5, peakValley: false, noon: true, night: true, autoComment: false, transcribe: false, asrModel: 'small',
     dmMode: 'off', dmUid: 0, qqForwardUrl: '', qqForwardToken: '', qqBackend: 'off', qqGroupIds: '', qqPrivateIds: '', briefMode: true, githubEnabled: true, githubToken: '', githubDiscover: true, workflowScan: true, scheduleEnabled: false, scheduleTime: '09:00',
-    keywords: [], guaranteeKeywords: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, overlayModel: true, guiProfile: 'desktop', modelLayerFile: '', stateDir: '', workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
+    keywords: [], guaranteeKeywords: [], domains: [], commentPerRound: 1, mentionName: '', pythonPath: 'python', dshBin: '', headlessProfile: 'headless', overlayMcp: true, overlayModel: true, guiProfile: 'desktop', modelLayerFile: '', stateDir: '', workspace: '', reportLevel: 'full', replyToComments: false, replyPerRound: 1,
   }
   const normalize = (src, base) => {
     const out = { ...base }
     for (const k of Object.keys(base)) {
       const v = src?.[k]
       if (v === undefined || v === null) continue
+      if (k === 'domains') { if (Array.isArray(v)) out[k] = v; continue }
       if (Array.isArray(base[k])) { if (Array.isArray(v)) out[k] = v.filter((x) => typeof x === 'string') }
       else if (typeof base[k] === 'number') { const n = Number(v); if (Number.isFinite(n)) out[k] = n }
       else if (typeof base[k] === 'boolean') { if (typeof v === 'boolean') out[k] = v }
@@ -268,7 +272,7 @@ export function apply(ctx, config) {
    *      commentPerRound 两条路径都没钳，直接 POST 能写 9999）
    *    （2026-10-17 复查补：DSH 原生设置页那条路我们钳不到**写** —— 用户能在那儿直接填 9999 ⇒
    *      loadCfg 读回来也过一遍，写进去和读出来一个口径） */
-  const clampPatch = (patch) => {
+  const clampPatch = (patch, notes = [], perDayCap = null) => {
     const p = { ...patch }
     if ('perDay' in p) p.perDay = Math.max(0, Math.min(Number(p.perDay) || 0, 50))
     if ('reportLevel' in p) p.reportLevel = ['full', 'brief', 'off'].includes(String(p.reportLevel)) ? String(p.reportLevel) : 'full'
@@ -293,7 +297,35 @@ export function apply(ctx, config) {
       const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(p.scheduleTime || '').trim())
       p.scheduleTime = m ? `${String(m[1]).padStart(2, '0')}:${m[2]}` : '09:00'
     }
+    // ⭐ 0.2.0：领域也要在写和读两头钳（面板能塞、config.json 也能手改）
+    if ('domains' in p) {
+      // patch 里带了 perDay 就用新的（同一次保存里 perDay 和 domains 一起改的情况），否则用当前值
+      const cap = Number.isFinite(Number(p.perDay)) ? Number(p.perDay)
+        : (perDayCap !== null && Number.isFinite(Number(perDayCap)) ? Number(perDayCap) : 0)
+      p.domains = normalizeDomains(p.domains, cap, notes)
+    }
     return p
+  }
+  /**
+   * 读配置的最后一步：旧关键词迁移 + 范围钳制。
+   * ⭐ 迁移是**只读**的（不写 config.json）—— 用户下次在面板保存时才落盘成 domains。
+   */
+  let domainsMigrated = false
+  let domainsMigratedLogged = false
+  const finalizeCfg = (c) => {
+    let out = c
+    try {
+      const mig = migrateLegacyDomains(c)
+      if (mig.migrated) {
+        out = { ...c, domains: mig.domains }
+        domainsMigrated = true
+        if (!domainsMigratedLogged) {
+          domainsMigratedLogged = true
+          log('已把旧的关键词迁移成领域（默认 / 保底），请在设置页确认 —— 迁移不写文件，下次保存才落盘')
+        }
+      }
+    } catch (e) { log('迁移旧关键词失败（不影响这一轮）：' + (e?.message ?? e)) }
+    return clampPatch(out, [], out.perDay)
   }
 
   const hostCfg = () => normalize(config, { ...DEFAULTS })       // 宿主那份（schema 校验过、默认值已填）
@@ -375,7 +407,7 @@ export function apply(ctx, config) {
       return out
     }
     // ⭐ 读回来统一过一遍范围：原生设置页那边我们是钳不到写的（见 clampPatch 的注释）
-    if (!row) return clampPatch(applyLegacyQQBackend(saved, {}))
+    if (!row) return finalizeCfg(applyLegacyQQBackend(saved, {}))
     const user = row.user || {}
     // ⭐ 2026-10-19（另一位用户的 dsh 给出的更彻底的一招）：**别用闭包里那份 `config` 当宿主基准** ——
     //    桌面版里它是挂载时的快照，之后写进 `cordis.patch.yml` 的值不会热刷新进来 ✗
@@ -400,7 +432,7 @@ export function apply(ctx, config) {
       lastDiffSig = sig
       log(`这些键以插件面板为准（DSH 原生设置里那份不一样）：${sig}`)
     }
-    return clampPatch(out)
+    return finalizeCfg(out)
   }
   const cfg = loadCfg()
   // ⭐ stateDir 是**启动时**定的（否则配置与家目录会互相依赖）。运行中改它只能重启生效 ⇒ 至少说一句。
@@ -462,7 +494,8 @@ export function apply(ctx, config) {
    *      漏掉任何一处，正好就是「设置页改了没反应」那个 bug 本身 ⇒ 收成一个函数。）
    */
   const persistCfg = async (patch) => {
-    const clean = clampPatch(patch)
+    const notes = []
+    const clean = clampPatch(patch, notes, cfg.perDay)
     // ⭐ 2026-10-26（下游实测）：`bili_config` 回 ok:true、配置其实没生效 —— 现场是
     //    「代码已拉到磁盘（0.1.11），但 GUI 进程里跑的还是 0.1.10 的 schema」这个窗口期：
     //      · perDay 写进了 config.json（生效）
@@ -492,7 +525,7 @@ export function apply(ctx, config) {
     //   ⚠️ 代价：同名的项若在 DSH 原生设置页改，以插件面板为准（我们的设置页才是"正式的家"）。
     markOverride(Object.keys(known), true)
     if (!host.ok) log('⚠️ 这几项没能同步到 DSH 原生设置，改为以插件自己的值为准：' + Object.keys(known).join(', ') + '（' + host.error + '）')
-    return { clean: known, host, ignored }
+    return { clean: known, host, ignored, notes }
   }
   /**
    * ⭐ 把「这次到底有没有生效」说成人话，工具层 / HTTP 接口 / 面板三处共用（2026-10-26 加）。
@@ -503,8 +536,9 @@ export function apply(ctx, config) {
    *      · not-written  这次没给 patch（只读）—— **不是失败，也不是成功，就是没写**
    *    ⚠️ 顶层 ok 只在「确实没完全生效」时为 false —— 以前恒 true，正是「工具说成功、配置被丢掉」那个 bug。
    */
-  const syncReport = (host, ignored = []) => {
+  const syncReport = (host, ignored = [], notes = []) => {
     const warn = []
+    for (const n of notes) if (n) warn.push(n)
     if (ignored.length) {
       warn.push('这些设置键这一版不认识，已经被丢掉：' + ignored.join('、')
         + '（多半是插件代码更新了、但 DSH 进程还在跑旧版 ⇒ 重启 DSH 再存一次）')
@@ -962,7 +996,9 @@ export function apply(ctx, config) {
     name: 'bili_config',
     description: '读 / 改「刷B站」的设置。不给 `patch` 就是读；给了就改（只认 schema 里的字段）。\n'
       + '例：`{"perDay":5,"peakValley":true,"noon":true,"night":true,"autoComment":false,"transcribe":false,"keywords":["DeepSeek Harness"]}`；'
-      + '保底组：`{"guaranteeKeywords":["dsh 插件","DeepSeek"]}`（这一组每轮至少挑 1 条、最多 2 条，占 perDay 名额）。'
+      + '领域（推荐）：`{"domains":[{"name":"AIGC","keywords":["ComfyUI","LoRA"]},{"name":"dsh 插件","keywords":["dsh 插件","DSH Harness"]}]}`'
+      + '（每个领域每轮至少 1 条，占 perDay 名额；有效领域数不能超过 perDay）。'
+      + '老字段：`{"guaranteeKeywords":["dsh 插件","DeepSeek"]}` 仍认，等价于一个叫「保底」的领域。'
       + '私信投递：`{"dmMode":"only","dmUid":12345678}`（dmMode = off / only / both）。'
       + 'QQ 转发：`{"qqBackend":"napcat-plugin","qqForwardUrl":"http://127.0.0.1:6099/plugin/napcat-plugin-dsh-bili-forward/api/forward","qqForwardToken":"...","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。'
       + 'OneBot：`{"qqBackend":"onebot","qqForwardUrl":"http://127.0.0.1:3000","qqGroupIds":"123456789","qqPrivateIds":"10001"}`。'
@@ -976,8 +1012,8 @@ export function apply(ctx, config) {
       // ⭐ 设置页显式设过的键以宿主为准 ⇒ 必须跟着写一份，否则"改了没反应"（钳范围也在这里）
       const r = hasPatch
         ? await persistCfg(args.patch)
-        : { host: { ok: null, state: 'not-written', hint: '这次没给 patch（只读），没有写任何设置' }, ignored: [] }
-      const sync = syncReport(r.host, r.ignored)
+        : { host: { ok: null, state: 'not-written', hint: '这次没给 patch（只读），没有写任何设置' }, ignored: [], notes: [] }
+      const sync = syncReport(r.host, r.ignored, r.notes)
       return { ...sync, config: publicCfg(), windows: WINDOWS, home: stateDir, venvReady: venvReadyNow() }
     },
   })
@@ -1186,7 +1222,10 @@ export function apply(ctx, config) {
     // ⭐ 2026-10-17（issue #8④）：章程里的 `<家目录>` 这种占位符会被模型读成 `~`，实测**整轮转写白跑** ✗
     //    ⇒ 在拼提示词这一步把**绝对路径**填进去，别让它猜（我们的老规矩：提示词一律给绝对路径）
     try { duty = String(duty).split('<家目录>').join(stateDir) } catch { /* 替换失败就按原文用 */ }
-    const kws = Array.isArray(cfg.keywords) ? cfg.keywords.filter(Boolean) : []
+    // ⭐ 0.2.0：搜索关键词 = 旧 keywords ∪ 各领域关键词（否则领域词根本不会被搜到）
+    const domainList = activeDomains(cfg.domains)
+    const ownKws = Array.isArray(cfg.keywords) ? cfg.keywords.filter(Boolean) : []
+    const kws = [...new Set([...ownKws, ...domainList.flatMap((d) => d.keywords)])]
     // ⭐ 那一轮的工作目录是**插件家**（runDuty 里 cwd = stateDir），宿主不会自动加载工作区的 AGENTS.md
     //    ⇒ **必须由我们自己读进来塞进提示词**（它在宿主进程里跑，没有沙箱限制 ✓）。
     //    ⚠️ 2026-10-25 修：以前这里写的是“工作目录就是使用者的工作区、AGENTS.md 会自动注入”——
@@ -1230,6 +1269,8 @@ export function apply(ctx, config) {
         ownerBlock,
         date: dayKey(),
         keywords: kws,
+        domains: domainList,
+        // 老配置兜底：renderer 优先用 domains，只有 domains 为空时才用这一组
         guaranteeKeywords: Array.isArray(cfg.guaranteeKeywords) ? cfg.guaranteeKeywords.filter(Boolean) : [],
         perDay: quota,
         already,
@@ -2017,6 +2058,8 @@ export function apply(ctx, config) {
       venvReady: venvReadyNow(),
       version: myVersion(),
       qqForward: Boolean(String(cfg.qqForwardUrl || "").trim()),
+      domains: activeDomains(cfg.domains).length,
+      domainsMigrated,
       briefMode: cfg.briefMode !== false,
       githubEnabled: cfg.githubEnabled !== false,
       githubTokenSet: Boolean(String(cfg.githubToken || '').trim()),
@@ -2067,7 +2110,7 @@ export function apply(ctx, config) {
       const dropped = []
       const CFG_PATCH_KEYS = ['perDay', 'peakValley', 'noon', 'night', 'autoComment', 'transcribe', 'asrModel',
         'commentPerRound', 'mentionName', 'dmMode', 'dmUid',
-        'keywords', 'guaranteeKeywords', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'stateDir', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']
+        'keywords', 'guaranteeKeywords', 'domains', 'pythonPath', 'dshBin', 'headlessProfile', 'overlayMcp', 'overlayModel', 'guiProfile', 'modelLayerFile', 'stateDir', 'workspace', 'reportLevel', 'replyToComments', 'replyPerRound', 'qqForwardUrl', 'qqForwardToken', 'qqBackend', 'qqGroupIds', 'qqPrivateIds', 'briefMode', 'githubEnabled', 'githubToken', 'githubDiscover', 'workflowScan', 'scheduleEnabled', 'scheduleTime']
       for (const k of CFG_PATCH_KEYS) {
         if (k in body) patch[k] = body[k]
       }
@@ -2076,7 +2119,7 @@ export function apply(ctx, config) {
       // ⭐ 私信那两个字段的合法值（2026-10-17 摘 PR #9；其余范围钳制统一在 persistCfg 里）
       if ('dmMode' in patch) patch.dmMode = ['off', 'only', 'both'].includes(String(patch.dmMode)) ? String(patch.dmMode) : 'off'
       if ('dmUid' in patch) patch.dmUid = Math.max(0, Math.min(Number(patch.dmUid) || 0, Number.MAX_SAFE_INTEGER))
-      const { clean, host, ignored } = await persistCfg(patch)
+      const { clean, host, ignored, notes } = await persistCfg(patch)
       const allIgnored = [...dropped, ...ignored]
       const safeClean = { ...clean, githubToken: clean.githubToken ? '[set]' : '', qqForwardToken: clean.qqForwardToken ? '[set]' : '' }
       const hostText = host.state === 'synced' ? '已同步'
@@ -2084,7 +2127,7 @@ export function apply(ctx, config) {
           : '没写成：' + host.error
       log(`设置已更新：${JSON.stringify(safeClean)}（DSH 那边${hostText}）`
         + (allIgnored.length ? `；丢弃了不认识的键：${allIgnored.join(', ')}` : ''))
-      const sync = syncReport(host, allIgnored)
+      const sync = syncReport(host, allIgnored, notes)
       return sendJson(res, 200, { ...sync, config: publicCfg() })
     }
 
